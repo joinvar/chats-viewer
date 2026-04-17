@@ -52,7 +52,6 @@ export interface BaseEntry {
   timestamp: string;
   isSidechain: boolean;
   kind: EntryKind;
-  raw: any;
 }
 
 export interface UserEntry extends BaseEntry {

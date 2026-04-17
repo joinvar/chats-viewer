@@ -112,7 +112,6 @@ function toEntry(o: any): Entry | null {
     parentUuid: o.parentUuid ?? null,
     timestamp: o.timestamp ?? "",
     isSidechain: !!o.isSidechain,
-    raw: o,
   };
   if (!base.uuid) return null;
 

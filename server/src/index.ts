@@ -47,7 +47,8 @@ app.get("/api/sessions/:projectId/:sessionId", async (req, res) => {
     const file = sessionFilePath(req.params.projectId, req.params.sessionId);
     if (!fs.existsSync(file)) return res.status(404).json({ error: "not found" });
     const t = await parseSession(req.params.projectId, req.params.sessionId, file);
-    res.json(t);
+    const { byUuid: _drop, ...wire } = t;
+    res.json(wire);
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }
