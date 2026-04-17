@@ -32,6 +32,7 @@ export async function listProjects(): Promise<ProjectSummary[]> {
     const dirPath = path.join(PROJECTS_ROOT, d.name);
     let sessionCount = 0;
     let lastModified = 0;
+    let newestFile = "";
     try {
       const files = await fs.promises.readdir(dirPath);
       for (const f of files) {
@@ -39,21 +40,53 @@ export async function listProjects(): Promise<ProjectSummary[]> {
         sessionCount++;
         try {
           const st = await fs.promises.stat(path.join(dirPath, f));
-          if (st.mtimeMs > lastModified) lastModified = st.mtimeMs;
+          if (st.mtimeMs > lastModified) {
+            lastModified = st.mtimeMs;
+            newestFile = path.join(dirPath, f);
+          }
         } catch {}
       }
     } catch {
       continue;
     }
+    // Real cwd comes from inside the session file. The dir-name decoder loses
+    // info when the original path contains a `-`, so prefer the session's
+    // recorded value and fall back to the decoder if we can't read one.
+    const realCwd = newestFile ? await readCwdFromSession(newestFile) : undefined;
     out.push({
       id: d.name,
-      cwd: decodeProjectId(d.name),
+      cwd: realCwd ?? decodeProjectId(d.name),
       sessionCount,
       lastModified: lastModified ? new Date(lastModified).toISOString() : "",
     });
   }
   out.sort((a, b) => (b.lastModified || "").localeCompare(a.lastModified || ""));
   return out;
+}
+
+async function readCwdFromSession(filePath: string): Promise<string | undefined> {
+  // Most jsonl lines carry a `cwd` field; the very first line usually has one.
+  // Stream and bail out on the first hit so we don't parse the whole file.
+  const stream = fs.createReadStream(filePath, { encoding: "utf8" });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    let scanned = 0;
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      if (++scanned > 50) break; // stop early on pathological files
+      let o: any;
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (typeof o?.cwd === "string" && o.cwd) return o.cwd;
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+  return undefined;
 }
 
 /** Stream-read a JSONL file to extract session summary without parsing everything. */
