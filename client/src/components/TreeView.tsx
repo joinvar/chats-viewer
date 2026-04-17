@@ -5,10 +5,12 @@ import { isToolResultEntry } from "../util";
 export function TreeView(props: {
   transcript: Transcript;
   selectedUuid: string | null;
+  clickedUuid?: string | null;
   onSelect: (uuid: string) => void;
 }) {
-  const { transcript, selectedUuid, onSelect } = props;
+  const { transcript, selectedUuid, clickedUuid, onSelect } = props;
   const { roots, childrenOf, byUuid } = transcript;
+  const highlightUuid = clickedUuid ?? selectedUuid;
 
   const pathSet = useMemo(() => {
     if (!selectedUuid) return new Set<string>();
@@ -26,7 +28,7 @@ export function TreeView(props: {
     if (!e) return null;
     const kids = childrenOf[uuid] ?? [];
     const onPath = pathSet.has(uuid);
-    const selected = uuid === selectedUuid;
+    const selected = uuid === highlightUuid;
     const toolResult = isToolResultEntry(e);
     return (
       <button

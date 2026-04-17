@@ -242,6 +242,9 @@ body.col-resizing * {
 .transcript-actions {
   grid-row: 1;
   grid-column: 2;
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 .transcript-resume {
   grid-column: 1 / -1;
