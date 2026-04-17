@@ -26,6 +26,18 @@ async function loadTranscript(projectId: string, sessionId: string): Promise<Tra
   return t;
 }
 
+async function del(url: string): Promise<void> {
+  const r = await fetch(url, { method: "DELETE" });
+  if (!r.ok) {
+    let msg = `${r.status} ${r.statusText}`;
+    try {
+      const body = await r.json();
+      if (body?.error) msg = body.error;
+    } catch {}
+    throw new Error(msg);
+  }
+}
+
 export const api = {
   projects: () => j<ProjectSummary[]>("/api/projects"),
   sessions: (projectId: string) =>
@@ -33,4 +45,8 @@ export const api = {
   session: loadTranscript,
   search: (q: string) =>
     j<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}`),
+  deleteProject: (projectId: string) =>
+    del(`/api/projects/${encodeURIComponent(projectId)}`),
+  deleteSession: (projectId: string, sessionId: string) =>
+    del(`/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`),
 };

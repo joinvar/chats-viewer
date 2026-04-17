@@ -7,8 +7,10 @@ export function SessionList(props: {
   loading: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  dangerMode?: boolean;
+  onDelete?: (id: string) => void;
 }) {
-  const { sessions, loading, selectedId, onSelect } = props;
+  const { sessions, loading, selectedId, onSelect, dangerMode, onDelete } = props;
   return (
     <div className="list">
       <div className="list-header">
@@ -30,7 +32,8 @@ export function SessionList(props: {
             key={s.sessionId}
             className={
               "list-item list-item-session" +
-              (s.sessionId === selectedId ? " selected" : "")
+              (s.sessionId === selectedId ? " selected" : "") +
+              (dangerMode ? " danger-on" : "")
             }
             onClick={() => onSelect(s.sessionId)}
             title={s.sessionId}
@@ -44,6 +47,18 @@ export function SessionList(props: {
               </div>
             </div>
             <CopyResume sessionId={s.sessionId} variant="icon" />
+            {dangerMode && onDelete && (
+              <button
+                className="delete-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(s.sessionId);
+                }}
+                title="删除该 session（不可恢复）"
+              >
+                ✕
+              </button>
+            )}
           </div>
         );
       })}

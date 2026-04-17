@@ -6,6 +6,8 @@ import {
   listProjects,
   listSessions,
   sessionFilePath,
+  deleteProject,
+  deleteSession,
 } from "./projects.js";
 import { parseSession } from "./parser.js";
 import { search } from "./search.js";
@@ -51,6 +53,24 @@ app.get("/api/sessions/:projectId/:sessionId", async (req, res) => {
     res.json(wire);
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
+  }
+});
+
+app.delete("/api/projects/:id", async (req, res) => {
+  try {
+    await deleteProject(req.params.id);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message ?? "error" });
+  }
+});
+
+app.delete("/api/sessions/:projectId/:sessionId", async (req, res) => {
+  try {
+    await deleteSession(req.params.projectId, req.params.sessionId);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message ?? "error" });
   }
 });
 

@@ -347,6 +347,64 @@ body.col-resizing * {
   color: var(--accent-2);
   margin-left: 2px;
 }
+.toggle.danger {
+  color: var(--system);
+  border-color: rgba(176, 70, 63, 0.3);
+}
+.toggle.danger:hover {
+  background: rgba(176, 70, 63, 0.08);
+  border-color: rgba(176, 70, 63, 0.5);
+}
+.toggle.danger.on {
+  background: var(--system);
+  color: #fff;
+  border-color: var(--system);
+  box-shadow: 0 0 0 3px rgba(176, 70, 63, 0.18);
+}
+
+/* List rows in danger mode get a subtle red wash */
+.list-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.list-item-row .item-main,
+.list-item-session .item-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.list-item.danger-on {
+  border-left-color: rgba(176, 70, 63, 0.25);
+}
+.list-item.danger-on:hover {
+  background: rgba(176, 70, 63, 0.06);
+}
+
+.delete-btn {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  color: var(--system);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.1s, background 0.1s, border-color 0.1s;
+}
+.list-item:hover .delete-btn {
+  opacity: 1;
+}
+.delete-btn:hover {
+  background: var(--system);
+  color: #fff;
+  border-color: var(--system);
+}
 
 .transcript-body {
   flex: 1 1 auto;

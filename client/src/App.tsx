@@ -53,6 +53,9 @@ export default function App() {
 
   const [widths, setWidths] = useState(loadWidths);
   const [vis, setVis] = useState(loadVis);
+  // Danger mode is intentionally not persisted — it always starts off after a
+  // refresh so destructive deletes can never be left armed by accident.
+  const [dangerMode, setDangerMode] = useState(false);
 
   function toggleVis(key: "projects" | "sessions") {
     setVis((v) => {
@@ -62,6 +65,54 @@ export default function App() {
       } catch {}
       return next;
     });
+  }
+
+  async function handleDeleteProject(id: string) {
+    const proj = projects.find((p) => p.id === id);
+    const label = proj?.cwd || id;
+    if (!window.confirm(`确认删除项目「${label}」？\n\n该项目下所有 session (.jsonl) 都会被删除。`)) {
+      return;
+    }
+    if (!window.confirm(`再次确认：删除「${label}」会直接删除 ~/.claude/projects/${id} 整个目录，无法恢复！\n\n继续？`)) {
+      return;
+    }
+    try {
+      await api.deleteProject(id);
+      setProjects((ps) => ps.filter((p) => p.id !== id));
+      if (projectId === id) {
+        setProjectId(null);
+        setSessionId(null);
+        setSessionsData(null);
+        setTranscript(null);
+      }
+    } catch (e) {
+      setError(`删除项目失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleDeleteSession(sid: string) {
+    if (!projectId) return;
+    const sess = sessions.find((s) => s.sessionId === sid);
+    const label =
+      sess?.customTitle || sess?.agentName || sess?.firstUserText?.slice(0, 60) || sid.slice(0, 8);
+    if (!window.confirm(`确认删除 session「${label}」？`)) return;
+    if (!window.confirm(`再次确认：将永久删除文件 ${sid}.jsonl，无法恢复！\n\n继续？`)) return;
+    try {
+      await api.deleteSession(projectId, sid);
+      setSessionsData((d) =>
+        d && d.projectId === projectId
+          ? { projectId, items: d.items.filter((s) => s.sessionId !== sid) }
+          : d
+      );
+      if (sessionId === sid) {
+        setSessionId(null);
+        setTranscript(null);
+      }
+      // Refresh project list so sessionCount stays accurate.
+      api.projects().then(setProjects).catch(() => {});
+    } catch (e) {
+      setError(`删除 session 失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   // Expose a plain sessions array for rendering / search hit prefill.
@@ -167,6 +218,13 @@ export default function App() {
           >
             ▤ Sessions
           </button>
+          <button
+            className={"toggle danger" + (dangerMode ? " on" : "")}
+            onClick={() => setDangerMode((v) => !v)}
+            title="开启后可删除 project / session 源文件，且无法恢复"
+          >
+            ⚠ 危险模式{dangerMode ? "·开" : ""}
+          </button>
         </div>
         <SearchBar onOpenHit={openSearchHit} />
       </header>
@@ -183,6 +241,8 @@ export default function App() {
                 projects={projects}
                 selectedId={projectId}
                 onSelect={setProjectId}
+                dangerMode={dangerMode}
+                onDelete={handleDeleteProject}
               />
             </aside>
             <Splitter onDrag={resizeA} onEnd={persist} />
@@ -196,6 +256,8 @@ export default function App() {
                 loading={loadingSessions}
                 selectedId={sessionId}
                 onSelect={setSessionId}
+                dangerMode={dangerMode}
+                onDelete={handleDeleteSession}
               />
             </aside>
             <Splitter onDrag={resizeB} onEnd={persist} />

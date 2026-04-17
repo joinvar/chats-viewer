@@ -5,24 +5,44 @@ export function ProjectList(props: {
   projects: ProjectSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  dangerMode?: boolean;
+  onDelete?: (id: string) => void;
 }) {
-  const { projects, selectedId, onSelect } = props;
+  const { projects, selectedId, onSelect, dangerMode, onDelete } = props;
   return (
     <div className="list">
       <div className="list-header">Projects · {projects.length}</div>
       {projects.map((p) => (
-        <button
+        <div
           key={p.id}
-          className={"list-item" + (p.id === selectedId ? " selected" : "")}
+          className={
+            "list-item list-item-row" +
+            (p.id === selectedId ? " selected" : "") +
+            (dangerMode ? " danger-on" : "")
+          }
           onClick={() => onSelect(p.id)}
           title={p.cwd}
         >
-          <div className="item-title">{shortCwd(p.cwd)}</div>
-          <div className="item-sub">
-            {p.sessionCount} session{p.sessionCount === 1 ? "" : "s"}
-            {p.lastModified && " · " + formatRelative(p.lastModified)}
+          <div className="item-main">
+            <div className="item-title">{shortCwd(p.cwd)}</div>
+            <div className="item-sub">
+              {p.sessionCount} session{p.sessionCount === 1 ? "" : "s"}
+              {p.lastModified && " · " + formatRelative(p.lastModified)}
+            </div>
           </div>
-        </button>
+          {dangerMode && onDelete && (
+            <button
+              className="delete-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(p.id);
+              }}
+              title="删除该项目（不可恢复）"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       ))}
     </div>
   );

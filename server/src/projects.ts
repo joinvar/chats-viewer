@@ -129,3 +129,38 @@ export async function listSessions(projectId: string): Promise<SessionSummary[]>
 export function sessionFilePath(projectId: string, sessionId: string): string {
   return path.join(PROJECTS_ROOT, projectId, `${sessionId}.jsonl`);
 }
+
+function assertSafeProjectId(id: string): void {
+  if (!id || id.includes("..") || id.includes("/") || id.includes("\\") || id.includes("\0")) {
+    throw new Error("invalid project id");
+  }
+}
+
+function assertSafeSessionId(id: string): void {
+  if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) {
+    throw new Error("invalid session id");
+  }
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  assertSafeProjectId(projectId);
+  const dir = path.join(PROJECTS_ROOT, projectId);
+  const resolved = path.resolve(dir);
+  if (!resolved.startsWith(path.resolve(PROJECTS_ROOT) + path.sep)) {
+    throw new Error("path escapes projects root");
+  }
+  if (!fs.existsSync(dir)) throw new Error("project not found");
+  await fs.promises.rm(dir, { recursive: true, force: true });
+}
+
+export async function deleteSession(projectId: string, sessionId: string): Promise<void> {
+  assertSafeProjectId(projectId);
+  assertSafeSessionId(sessionId);
+  const file = sessionFilePath(projectId, sessionId);
+  const resolved = path.resolve(file);
+  if (!resolved.startsWith(path.resolve(PROJECTS_ROOT) + path.sep)) {
+    throw new Error("path escapes projects root");
+  }
+  if (!fs.existsSync(file)) throw new Error("session not found");
+  await fs.promises.unlink(file);
+}
