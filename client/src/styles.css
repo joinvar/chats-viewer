@@ -198,6 +198,9 @@ body.col-resizing * {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Give descenders (notably `_`) room — `overflow: hidden` on a tight
+     line-box otherwise clips the underscore out of sight. */
+  line-height: 1.4;
 }
 .item-sub {
   font-size: 11px;
@@ -206,6 +209,7 @@ body.col-resizing * {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.4;
 }
 
 .hint {

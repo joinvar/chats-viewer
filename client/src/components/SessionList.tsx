@@ -37,7 +37,7 @@ export function SessionList(props: {
               (dangerMode ? " danger-on" : "")
             }
             onClick={() => onSelect(s.sessionId)}
-            title={s.sessionId}
+            title={`${title}\n${s.sessionId}`}
           >
             <div className="item-main">
               <div className="item-title">{title}</div>
