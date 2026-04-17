@@ -9,8 +9,9 @@ export function SessionList(props: {
   onSelect: (id: string) => void;
   dangerMode?: boolean;
   onDelete?: (id: string) => void;
+  onRename?: (id: string, currentTitle: string) => void;
 }) {
-  const { sessions, loading, selectedId, onSelect, dangerMode, onDelete } = props;
+  const { sessions, loading, selectedId, onSelect, dangerMode, onDelete, onRename } = props;
   return (
     <div className="list">
       <div className="list-header">
@@ -46,6 +47,18 @@ export function SessionList(props: {
                 {s.gitBranch && " · " + s.gitBranch}
               </div>
             </div>
+            {onRename && (
+              <button
+                className="rename-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRename(s.sessionId, title);
+                }}
+                title="重命名 session"
+              >
+                ✎
+              </button>
+            )}
             <CopyResume sessionId={s.sessionId} variant="icon" />
             {dangerMode && onDelete && (
               <button

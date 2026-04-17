@@ -164,3 +164,45 @@ export async function deleteSession(projectId: string, sessionId: string): Promi
   if (!fs.existsSync(file)) throw new Error("session not found");
   await fs.promises.unlink(file);
 }
+
+export async function renameSession(
+  projectId: string,
+  sessionId: string,
+  customTitle: string
+): Promise<void> {
+  assertSafeProjectId(projectId);
+  assertSafeSessionId(sessionId);
+  if (typeof customTitle !== "string") throw new Error("invalid title");
+  // Normalize: strip control chars / newlines so one entry stays on one line.
+  const cleaned = customTitle.replace(/[\r\n\t\x00-\x1f\x7f]/g, " ").trim();
+  if (!cleaned) throw new Error("empty title");
+  if (cleaned.length > 500) throw new Error("title too long");
+
+  const file = sessionFilePath(projectId, sessionId);
+  const resolved = path.resolve(file);
+  if (!resolved.startsWith(path.resolve(PROJECTS_ROOT) + path.sep)) {
+    throw new Error("path escapes projects root");
+  }
+  if (!fs.existsSync(file)) throw new Error("session not found");
+
+  // Rename by appending a new custom-title entry. Both the parser and the
+  // session summarizer take the last-seen customTitle, so this overrides any
+  // earlier one without rewriting the file.
+  const entry = JSON.stringify({ type: "custom-title", customTitle: cleaned, sessionId });
+  // Make sure we start on a new line even if the file happens not to end in \n.
+  let prefix = "";
+  try {
+    const fd = await fs.promises.open(file, "r");
+    try {
+      const st = await fd.stat();
+      if (st.size > 0) {
+        const buf = Buffer.alloc(1);
+        await fd.read(buf, 0, 1, st.size - 1);
+        if (buf[0] !== 0x0a) prefix = "\n";
+      }
+    } finally {
+      await fd.close();
+    }
+  } catch {}
+  await fs.promises.appendFile(file, prefix + entry + "\n", "utf8");
+}

@@ -90,6 +90,29 @@ export default function App() {
     }
   }
 
+  async function handleRenameSession(sid: string, currentTitle: string) {
+    if (!projectId) return;
+    const input = window.prompt("重命名 session", currentTitle);
+    if (input == null) return;
+    const next = input.trim();
+    if (!next || next === currentTitle) return;
+    try {
+      await api.renameSession(projectId, sid, next);
+      setSessionsData((d) =>
+        d && d.projectId === projectId
+          ? {
+              projectId,
+              items: d.items.map((s) =>
+                s.sessionId === sid ? { ...s, customTitle: next } : s
+              ),
+            }
+          : d
+      );
+    } catch (e) {
+      setError(`重命名失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   async function handleDeleteSession(sid: string) {
     if (!projectId) return;
     const sess = sessions.find((s) => s.sessionId === sid);
@@ -258,6 +281,7 @@ export default function App() {
                 onSelect={setSessionId}
                 dangerMode={dangerMode}
                 onDelete={handleDeleteSession}
+                onRename={handleRenameSession}
               />
             </aside>
             <Splitter onDrag={resizeB} onEnd={persist} />

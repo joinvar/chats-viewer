@@ -38,6 +38,22 @@ async function del(url: string): Promise<void> {
   }
 }
 
+async function patch(url: string, body: unknown): Promise<void> {
+  const r = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let msg = `${r.status} ${r.statusText}`;
+    try {
+      const b = await r.json();
+      if (b?.error) msg = b.error;
+    } catch {}
+    throw new Error(msg);
+  }
+}
+
 export const api = {
   projects: () => j<ProjectSummary[]>("/api/projects"),
   sessions: (projectId: string) =>
@@ -49,4 +65,9 @@ export const api = {
     del(`/api/projects/${encodeURIComponent(projectId)}`),
   deleteSession: (projectId: string, sessionId: string) =>
     del(`/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`),
+  renameSession: (projectId: string, sessionId: string, customTitle: string) =>
+    patch(
+      `/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`,
+      { customTitle }
+    ),
 };

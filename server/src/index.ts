@@ -8,6 +8,7 @@ import {
   sessionFilePath,
   deleteProject,
   deleteSession,
+  renameSession,
 } from "./projects.js";
 import { parseSession } from "./parser.js";
 import { search } from "./search.js";
@@ -17,6 +18,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
+
+app.use(express.json({ limit: "16kb" }));
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -68,6 +71,16 @@ app.delete("/api/projects/:id", async (req, res) => {
 app.delete("/api/sessions/:projectId/:sessionId", async (req, res) => {
   try {
     await deleteSession(req.params.projectId, req.params.sessionId);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message ?? "error" });
+  }
+});
+
+app.patch("/api/sessions/:projectId/:sessionId", async (req, res) => {
+  try {
+    const title = req.body?.customTitle;
+    await renameSession(req.params.projectId, req.params.sessionId, title);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ error: e?.message ?? "error" });
