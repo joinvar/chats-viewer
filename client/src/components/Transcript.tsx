@@ -7,6 +7,7 @@ import { Splitter } from "./Splitter";
 import { formatTime } from "../util";
 
 const TREE_W_KEY = "chats-viewer:tree-width";
+const VIEW_MODE_KEY = "chats-viewer:view-mode";
 const TREE_MIN = 180;
 const TREE_DEFAULT = 320;
 
@@ -21,6 +22,20 @@ function loadTreeWidth(): number {
   return TREE_DEFAULT;
 }
 
+function loadViewMode(): { showAll: boolean; showTree: boolean } {
+  try {
+    const s = localStorage.getItem(VIEW_MODE_KEY);
+    if (s) {
+      const o = JSON.parse(s);
+      return {
+        showAll: o.showAll === true,
+        showTree: o.showTree === true,
+      };
+    }
+  } catch {}
+  return { showAll: false, showTree: false };
+}
+
 export function TranscriptView(props: {
   transcript: Transcript;
   scrollToUuid: string | null;
@@ -29,9 +44,34 @@ export function TranscriptView(props: {
   const { transcript, scrollToUuid, onConsumedScroll } = props;
   const { entries, byUuid, childrenOf, roots } = transcript;
 
-  const [showTree, setShowTree] = useState(false);
-  const [showAll, setShowAll] = useState(false);
+  const [showTree, setShowTree] = useState(() => loadViewMode().showTree);
+  const [showAll, setShowAll] = useState(() => loadViewMode().showAll);
   const [treeWidth, setTreeWidth] = useState(loadTreeWidth);
+
+  function toggleShowAll() {
+    setShowAll((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(
+          VIEW_MODE_KEY,
+          JSON.stringify({ showAll: next, showTree })
+        );
+      } catch {}
+      return next;
+    });
+  }
+  function toggleShowTree() {
+    setShowTree((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(
+          VIEW_MODE_KEY,
+          JSON.stringify({ showAll, showTree: next })
+        );
+      } catch {}
+      return next;
+    });
+  }
   const [selectedLeaf, setSelectedLeaf] = useState<string | null>(null);
   const [clickedNode, setClickedNode] = useState<string | null>(null);
   const [innerScroll, setInnerScroll] = useState<string | null>(null);
@@ -150,14 +190,14 @@ export function TranscriptView(props: {
         <div className="transcript-actions">
           <button
             className={"toggle" + (showAll ? " on" : "")}
-            onClick={() => setShowAll(!showAll)}
+            onClick={toggleShowAll}
             title="Show every message in the session (ignore branch path)"
           >
             ≡ All {hasBranches && <span className="dot">•</span>}
           </button>
           <button
             className={"toggle" + (showTree ? " on" : "")}
-            onClick={() => setShowTree(!showTree)}
+            onClick={toggleShowTree}
             title="Toggle branch tree view"
           >
             ⎇ Tree {hasBranches && <span className="dot">•</span>}
