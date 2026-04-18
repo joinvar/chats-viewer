@@ -39,39 +39,41 @@ export function SessionList(props: {
             onClick={() => onSelect(s.sessionId)}
             title={`${title}\n${s.sessionId}`}
           >
-            <div className="item-main">
-              <div className="item-title">{title}</div>
+            <div className="item-title">{title}</div>
+            <div className="item-footer">
               <div className="item-sub">
                 {s.messageCount} msg
                 {s.endedAt && " · " + formatRelative(s.endedAt)}
                 {s.gitBranch && " · " + s.gitBranch}
               </div>
+              <div className="item-actions">
+                {onRename && (
+                  <button
+                    className="rename-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRename(s.sessionId, title);
+                    }}
+                    title="重命名 session"
+                  >
+                    ✎
+                  </button>
+                )}
+                <CopyResume sessionId={s.sessionId} variant="icon" />
+                {dangerMode && onDelete && (
+                  <button
+                    className="delete-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(s.sessionId);
+                    }}
+                    title="删除该 session（不可恢复）"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
-            {onRename && (
-              <button
-                className="rename-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRename(s.sessionId, title);
-                }}
-                title="重命名 session"
-              >
-                ✎
-              </button>
-            )}
-            <CopyResume sessionId={s.sessionId} variant="icon" />
-            {dangerMode && onDelete && (
-              <button
-                className="delete-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(s.sessionId);
-                }}
-                title="删除该 session（不可恢复）"
-              >
-                ✕
-              </button>
-            )}
           </div>
         );
       })}
