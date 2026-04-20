@@ -12,6 +12,23 @@ import {
 } from "./projects.js";
 import { parseSession } from "./parser.js";
 import { search } from "./search.js";
+import {
+  listCursorProjects,
+  listCursorSessions,
+  cursorSessionFilePath,
+  parseCursorSession,
+  deleteCursorProject,
+  deleteCursorSession,
+} from "./cursor.js";
+import {
+  listCodexProjects,
+  listCodexSessions,
+  codexSessionFilePath,
+  parseCodexSession,
+  deleteCodexProject,
+  deleteCodexSession,
+  renameCodexSession,
+} from "./codex.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,9 +48,22 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/api/projects", async (_req, res) => {
+type Source = "claude" | "cursor" | "codex";
+function pickSource(req: express.Request): Source {
+  if (req.query.source === "codex") return "codex";
+  return req.query.source === "cursor" ? "cursor" : "claude";
+}
+
+app.get("/api/projects", async (req, res) => {
   try {
-    res.json(await listProjects());
+    const src = pickSource(req);
+    res.json(
+      src === "cursor"
+        ? await listCursorProjects()
+        : src === "codex"
+        ? await listCodexProjects()
+        : await listProjects()
+    );
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }
@@ -41,7 +71,14 @@ app.get("/api/projects", async (_req, res) => {
 
 app.get("/api/projects/:id/sessions", async (req, res) => {
   try {
-    res.json(await listSessions(req.params.id));
+    const src = pickSource(req);
+    res.json(
+      src === "cursor"
+        ? await listCursorSessions(req.params.id)
+        : src === "codex"
+        ? await listCodexSessions(req.params.id)
+        : await listSessions(req.params.id)
+    );
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }
@@ -49,9 +86,20 @@ app.get("/api/projects/:id/sessions", async (req, res) => {
 
 app.get("/api/sessions/:projectId/:sessionId", async (req, res) => {
   try {
-    const file = sessionFilePath(req.params.projectId, req.params.sessionId);
+    const src = pickSource(req);
+    const file =
+      src === "cursor"
+        ? cursorSessionFilePath(req.params.projectId, req.params.sessionId)
+        : src === "codex"
+        ? await codexSessionFilePath(req.params.projectId, req.params.sessionId)
+        : sessionFilePath(req.params.projectId, req.params.sessionId);
     if (!fs.existsSync(file)) return res.status(404).json({ error: "not found" });
-    const t = await parseSession(req.params.projectId, req.params.sessionId, file);
+    const t =
+      src === "cursor"
+        ? await parseCursorSession(req.params.projectId, req.params.sessionId, file)
+        : src === "codex"
+        ? await parseCodexSession(req.params.projectId, req.params.sessionId, file)
+        : await parseSession(req.params.projectId, req.params.sessionId, file);
     const { byUuid: _drop, ...wire } = t;
     res.json(wire);
   } catch (e: any) {
@@ -61,7 +109,10 @@ app.get("/api/sessions/:projectId/:sessionId", async (req, res) => {
 
 app.delete("/api/projects/:id", async (req, res) => {
   try {
-    await deleteProject(req.params.id);
+    const src = pickSource(req);
+    if (src === "cursor") await deleteCursorProject(req.params.id);
+    else if (src === "codex") await deleteCodexProject(req.params.id);
+    else await deleteProject(req.params.id);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ error: e?.message ?? "error" });
@@ -70,7 +121,10 @@ app.delete("/api/projects/:id", async (req, res) => {
 
 app.delete("/api/sessions/:projectId/:sessionId", async (req, res) => {
   try {
-    await deleteSession(req.params.projectId, req.params.sessionId);
+    const src = pickSource(req);
+    if (src === "cursor") await deleteCursorSession(req.params.projectId, req.params.sessionId);
+    else if (src === "codex") await deleteCodexSession(req.params.projectId, req.params.sessionId);
+    else await deleteSession(req.params.projectId, req.params.sessionId);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ error: e?.message ?? "error" });
@@ -79,8 +133,19 @@ app.delete("/api/sessions/:projectId/:sessionId", async (req, res) => {
 
 app.patch("/api/sessions/:projectId/:sessionId", async (req, res) => {
   try {
+    const src = pickSource(req);
     const title = req.body?.customTitle;
-    await renameSession(req.params.projectId, req.params.sessionId, title);
+    if (src === "claude") {
+      await renameSession(req.params.projectId, req.params.sessionId, title);
+    } else if (src === "codex") {
+      // Codex stores thread names in ~/.codex/session_index.jsonl, not inside
+      // the session jsonl files — we can rewrite that index safely.
+      await renameCodexSession(req.params.sessionId, title);
+    } else {
+      // Cursor's transcript is a pure event log written by Cursor itself, with
+      // no separate title index to update.
+      throw new Error(`rename not supported for ${src} sessions`);
+    }
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ error: e?.message ?? "error" });
@@ -90,7 +155,8 @@ app.patch("/api/sessions/:projectId/:sessionId", async (req, res) => {
 app.get("/api/search", async (req, res) => {
   try {
     const q = String(req.query.q ?? "");
-    res.json(await search(q));
+    const src = pickSource(req);
+    res.json(await search(q, 100, src));
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }

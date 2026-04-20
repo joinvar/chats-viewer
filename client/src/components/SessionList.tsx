@@ -1,4 +1,5 @@
 import type { SessionSummary } from "../types";
+import type { Source } from "../api";
 import { formatRelative } from "../util";
 import { CopyResume } from "./CopyResume";
 
@@ -10,8 +11,9 @@ export function SessionList(props: {
   dangerMode?: boolean;
   onDelete?: (id: string) => void;
   onRename?: (id: string, currentTitle: string) => void;
+  source?: Source;
 }) {
-  const { sessions, loading, selectedId, onSelect, dangerMode, onDelete, onRename } = props;
+  const { sessions, loading, selectedId, onSelect, dangerMode, onDelete, onRename, source } = props;
   return (
     <div className="list">
       <div className="list-header">
@@ -59,7 +61,7 @@ export function SessionList(props: {
                     ✎
                   </button>
                 )}
-                <CopyResume sessionId={s.sessionId} variant="icon" />
+                <CopyResume sessionId={s.sessionId} variant="icon" source={source} />
                 {dangerMode && onDelete && (
                   <button
                     className="delete-btn"

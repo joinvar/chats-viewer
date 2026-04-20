@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, type Source } from "../api";
 import type { SearchHit } from "../types";
 import { formatRelative } from "../util";
 
 export function SearchBar({
   onOpenHit,
+  source = "claude",
 }: {
   onOpenHit: (hit: SearchHit) => void;
+  source?: Source;
 }) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -14,6 +16,13 @@ export function SearchBar({
   const [loading, setLoading] = useState(false);
   const timer = useRef<number | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
+
+  // Clear results when the user swaps data sources — stale claude hits in a
+  // cursor view (or vice versa) wouldn't map to any real session.
+  useEffect(() => {
+    setHits([]);
+    setQ("");
+  }, [source]);
 
   useEffect(() => {
     if (timer.current) window.clearTimeout(timer.current);
@@ -24,7 +33,7 @@ export function SearchBar({
     timer.current = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await api.search(q.trim());
+        const res = await api.search(q.trim(), source);
         setHits(res);
       } catch {
         setHits([]);
@@ -35,7 +44,7 @@ export function SearchBar({
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [q]);
+  }, [q, source]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -55,7 +64,13 @@ export function SearchBar({
           setQ(e.target.value);
           setOpen(true);
         }}
-        placeholder="Search all sessions…"
+        placeholder={
+          source === "cursor"
+            ? "搜索所有 Cursor 对话…"
+            : source === "codex"
+            ? "搜索所有 Codex 对话…"
+            : "搜索所有 Claude Code 对话…"
+        }
       />
       {open && q.trim().length >= 2 && (
         <div className="search-results">

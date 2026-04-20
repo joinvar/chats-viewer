@@ -1,13 +1,25 @@
 import { useState } from "react";
+import type { Source } from "../api";
 
 export function CopyResume(props: {
   sessionId: string;
   /** "pill" shows the full command; "icon" shows a compact button. */
   variant?: "pill" | "icon";
+  source?: Source;
 }) {
-  const { sessionId, variant = "pill" } = props;
+  const { sessionId, variant = "pill", source = "claude" } = props;
   const [copied, setCopied] = useState(false);
-  const cmd = `claude --resume ${sessionId}`;
+  const command =
+    source === "claude"
+      ? `claude --resume ${sessionId}`
+      : source === "codex"
+      ? `codex resume ${sessionId}`
+      : source === "cursor"
+      ? `agent --resume=${sessionId}`
+      : null;
+
+  if (!command) return null;
+  const cmd: string = command;
 
   async function copy(e: React.MouseEvent) {
     e.stopPropagation();

@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { api, type Source } from "./api";
 import type { ProjectSummary, SessionSummary, Transcript, SearchHit } from "./types";
 import { ProjectList } from "./components/ProjectList";
 import { SessionList } from "./components/SessionList";
 import { TranscriptView } from "./components/Transcript";
 import { SearchBar } from "./components/SearchBar";
+import { SourceSelect } from "./components/SourceSelect";
 import { Splitter } from "./components/Splitter";
 
 const MIN_W = 160;
 const MAX_FRAC = 0.6; // no single side column wider than 60% of viewport
 const STORAGE_KEY = "chats-viewer:col-widths";
 const VIS_KEY = "chats-viewer:col-visible";
+const SOURCE_KEY = "chats-viewer:source";
 
 function loadWidths(): { a: number; b: number } {
   try {
@@ -37,11 +39,27 @@ function loadVis(): { projects: boolean; sessions: boolean } {
   return { projects: true, sessions: true };
 }
 
+function loadSource(): Source {
+  try {
+    const s = localStorage.getItem(SOURCE_KEY);
+    if (s === "cursor" || s === "claude" || s === "codex") return s;
+  } catch {}
+  return "claude";
+}
+
+function sourceTitle(source: Source): string {
+  if (source === "cursor") return "Cursor";
+  if (source === "codex") return "Codex";
+  return "Claude Code";
+}
+
 export default function App() {
+  const [source, setSource] = useState<Source>(loadSource);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [sessionsData, setSessionsData] = useState<{
     projectId: string;
+    source: Source;
     items: SessionSummary[];
   } | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -67,17 +85,39 @@ export default function App() {
     });
   }
 
+  function switchSource(next: Source) {
+    if (next === source) return;
+    // Swapping data sources invalidates everything that was keyed by id —
+    // projectId / sessionId are not comparable between sources.
+    setSource(next);
+    setProjects([]);
+    setProjectId(null);
+    setSessionsData(null);
+    setSessionId(null);
+    setTranscript(null);
+    setError(null);
+    try {
+      localStorage.setItem(SOURCE_KEY, next);
+    } catch {}
+  }
+
   async function handleDeleteProject(id: string) {
     const proj = projects.find((p) => p.id === id);
     const label = proj?.cwd || id;
-    if (!window.confirm(`确认删除项目「${label}」？\n\n该项目下所有 session (.jsonl) 都会被删除。`)) {
+    const rootLabel =
+      source === "cursor"
+        ? `~/.cursor/projects/${id}/agent-transcripts`
+        : source === "codex"
+        ? `~/.codex/sessions（当前项目匹配的所有 session 文件）`
+        : `~/.claude/projects/${id}`;
+    if (!window.confirm(`确认删除项目「${label}」？\n\n该项目下所有 session 都会被删除。`)) {
       return;
     }
-    if (!window.confirm(`再次确认：删除「${label}」会直接删除 ~/.claude/projects/${id} 整个目录，无法恢复！\n\n继续？`)) {
+    if (!window.confirm(`再次确认：删除「${label}」会直接删除 ${rootLabel} 整个目录，无法恢复！\n\n继续？`)) {
       return;
     }
     try {
-      await api.deleteProject(id);
+      await api.deleteProject(id, source);
       setProjects((ps) => ps.filter((p) => p.id !== id));
       if (projectId === id) {
         setProjectId(null);
@@ -92,16 +132,20 @@ export default function App() {
 
   async function handleRenameSession(sid: string, currentTitle: string) {
     if (!projectId) return;
+    if (source === "cursor") {
+      setError(`${sourceTitle(source)} 对话不支持重命名`);
+      return;
+    }
     const input = window.prompt("重命名 session", currentTitle);
     if (input == null) return;
     const next = input.trim();
     if (!next || next === currentTitle) return;
     try {
-      await api.renameSession(projectId, sid, next);
+      await api.renameSession(projectId, sid, next, source);
       setSessionsData((d) =>
         d && d.projectId === projectId
           ? {
-              projectId,
+              ...d,
               items: d.items.map((s) =>
                 s.sessionId === sid ? { ...s, customTitle: next } : s
               ),
@@ -119,12 +163,18 @@ export default function App() {
     const label =
       sess?.customTitle || sess?.agentName || sess?.firstUserText?.slice(0, 60) || sid.slice(0, 8);
     if (!window.confirm(`确认删除 session「${label}」？`)) return;
-    if (!window.confirm(`再次确认：将永久删除文件 ${sid}.jsonl，无法恢复！\n\n继续？`)) return;
+    const pathHint =
+      source === "cursor"
+        ? `~/.cursor/projects/${projectId}/agent-transcripts/${sid}/`
+        : source === "codex"
+        ? `~/.codex/sessions 中的 Codex session ${sid}`
+        : `${sid}.jsonl`;
+    if (!window.confirm(`再次确认：将永久删除 ${pathHint}，无法恢复！\n\n继续？`)) return;
     try {
-      await api.deleteSession(projectId, sid);
+      await api.deleteSession(projectId, sid, source);
       setSessionsData((d) =>
         d && d.projectId === projectId
-          ? { projectId, items: d.items.filter((s) => s.sessionId !== sid) }
+          ? { ...d, items: d.items.filter((s) => s.sessionId !== sid) }
           : d
       );
       if (sessionId === sid) {
@@ -132,28 +182,39 @@ export default function App() {
         setTranscript(null);
       }
       // Refresh project list so sessionCount stays accurate.
-      api.projects().then(setProjects).catch(() => {});
+      api.projects(source).then(setProjects).catch(() => {});
     } catch (e) {
       setError(`删除 session 失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   // Expose a plain sessions array for rendering / search hit prefill.
-  const sessions = sessionsData?.projectId === projectId ? sessionsData.items : [];
+  const sessions =
+    sessionsData?.projectId === projectId && sessionsData.source === source
+      ? sessionsData.items
+      : [];
 
   useEffect(() => {
-    api.projects().then(setProjects).catch((e) => setError(String(e)));
-  }, []);
+    let cancelled = false;
+    api
+      .projects(source)
+      .then((ps) => !cancelled && setProjects(ps))
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
 
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
     setLoadingSessions(true);
+    const currentSource = source;
     api
-      .sessions(projectId)
+      .sessions(projectId, currentSource)
       .then((items) => {
         if (cancelled) return;
-        setSessionsData({ projectId, items });
+        setSessionsData({ projectId, source: currentSource, items });
         // Keep the current sessionId if it exists in the new list (e.g. set by
         // a search hit). Otherwise auto-pick the first session.
         setSessionId((prev) => {
@@ -166,7 +227,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, source]);
 
   useEffect(() => {
     if (!projectId || !sessionId) return;
@@ -175,20 +236,21 @@ export default function App() {
     // window during project switches where (newProjectId, oldSessionId) would
     // otherwise trigger a 404.
     if (!sessionsData || sessionsData.projectId !== projectId) return;
+    if (sessionsData.source !== source) return;
     if (!sessionsData.items.some((s) => s.sessionId === sessionId)) return;
 
     let cancelled = false;
     setLoadingTranscript(true);
     setTranscript(null);
     api
-      .session(projectId, sessionId)
+      .session(projectId, sessionId, source)
       .then((t) => !cancelled && setTranscript(t))
       .catch((e) => !cancelled && setError(String(e)))
       .finally(() => !cancelled && setLoadingTranscript(false));
     return () => {
       cancelled = true;
     };
-  }, [projectId, sessionId, sessionsData]);
+  }, [projectId, sessionId, sessionsData, source]);
 
   function openSearchHit(hit: SearchHit) {
     // Order matters slightly: set sessionId first so the sessions-load effect
@@ -225,7 +287,8 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">claude code · chats viewer</div>
+        <div className="brand">chats viewer</div>
+        <SourceSelect value={source} onChange={switchSource} />
         <div className="panel-toggles">
           <button
             className={"toggle" + (vis.projects ? " on" : "")}
@@ -249,7 +312,7 @@ export default function App() {
             ⚠ 危险模式{dangerMode ? "·开" : ""}
           </button>
         </div>
-        <SearchBar onOpenHit={openSearchHit} />
+        <SearchBar source={source} onOpenHit={openSearchHit} />
       </header>
       {error && (
         <div className="error-banner">
@@ -281,7 +344,8 @@ export default function App() {
                 onSelect={setSessionId}
                 dangerMode={dangerMode}
                 onDelete={handleDeleteSession}
-                onRename={handleRenameSession}
+                onRename={source !== "cursor" ? handleRenameSession : undefined}
+                source={source}
               />
             </aside>
             <Splitter onDrag={resizeB} onEnd={persist} />
@@ -297,6 +361,7 @@ export default function App() {
               transcript={transcript}
               scrollToUuid={scrollToUuid}
               onConsumedScroll={() => setScrollToUuid(null)}
+              source={source}
             />
           )}
         </main>

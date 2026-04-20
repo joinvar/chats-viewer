@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Transcript, Entry } from "../types";
+import type { Transcript, Entry, ContentBlock } from "../types";
 import { EntryView } from "./Entry";
 import { TreeView } from "./TreeView";
 import { CopyResume } from "./CopyResume";
 import { Splitter } from "./Splitter";
 import { formatTime } from "../util";
+import type { Source } from "../api";
 
 const TREE_W_KEY = "chats-viewer:tree-width";
 const VIEW_MODE_KEY = "chats-viewer:view-mode";
@@ -40,8 +41,9 @@ export function TranscriptView(props: {
   transcript: Transcript;
   scrollToUuid: string | null;
   onConsumedScroll: () => void;
+  source?: Source;
 }) {
-  const { transcript, scrollToUuid, onConsumedScroll } = props;
+  const { transcript, scrollToUuid, onConsumedScroll, source } = props;
   const { entries, byUuid, childrenOf, roots } = transcript;
 
   const [showTree, setShowTree] = useState(() => loadViewMode().showTree);
@@ -122,10 +124,19 @@ export function TranscriptView(props: {
     setSelectedLeaf(leaves[0]);
   }, [transcript]);
 
+  // cursor/codex sessions are inherently linear (no branching), so "All"
+  // toggles compact vs full instead of branch-path vs all-branches:
+  //   compact = hide entries whose only content is tool_use / tool_result /
+  //             thinking (keep the conversational flow).
+  //   full    = show every entry.
+  const isLinearSource = source === "cursor" || source === "codex";
+
   const pathEntries = useMemo<Entry[]>(() => {
-    if (showAll || !selectedLeaf) {
-      return entries.filter((e) => !e.isSidechain);
+    const nonSide = entries.filter((e) => !e.isSidechain);
+    if (isLinearSource) {
+      return showAll ? nonSide : nonSide.filter((e) => !isAuxiliaryEntry(e));
     }
+    if (showAll || !selectedLeaf) return nonSide;
     const path: string[] = [];
     let cur: string | null = selectedLeaf;
     while (cur && byUuid[cur]) {
@@ -134,7 +145,7 @@ export function TranscriptView(props: {
     }
     path.reverse();
     return path.map((u) => byUuid[u]).filter(Boolean);
-  }, [entries, byUuid, selectedLeaf, showAll]);
+  }, [entries, byUuid, selectedLeaf, showAll, isLinearSource]);
 
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -165,6 +176,14 @@ export function TranscriptView(props: {
     byUuid,
   ]);
   const hasBranches = roots.length > 1 || leafCount > 1;
+  const hasHiddenInCompact = useMemo(
+    () => isLinearSource && entries.some((e) => !e.isSidechain && isAuxiliaryEntry(e)),
+    [entries, isLinearSource]
+  );
+  const allHasEffect = isLinearSource ? hasHiddenInCompact : hasBranches;
+  const allTitle = isLinearSource
+    ? "Show every entry (including tool calls, tool results, and thinking)"
+    : "Show every message in the session (ignore branch path)";
 
   return (
     <div className="transcript">
@@ -185,15 +204,15 @@ export function TranscriptView(props: {
           <span> · {transcript.meta.messageCount} messages</span>
         </div>
         <div className="transcript-resume">
-          <CopyResume sessionId={transcript.meta.sessionId} />
+          <CopyResume sessionId={transcript.meta.sessionId} source={source} />
         </div>
         <div className="transcript-actions">
           <button
             className={"toggle" + (showAll ? " on" : "")}
             onClick={toggleShowAll}
-            title="Show every message in the session (ignore branch path)"
+            title={allTitle}
           >
-            ≡ All {hasBranches && <span className="dot">•</span>}
+            ≡ All {allHasEffect && <span className="dot">•</span>}
           </button>
           <button
             className={"toggle" + (showTree ? " on" : "")}
@@ -239,4 +258,25 @@ function findLeaves(
     if (!childrenOf[uuid] || childrenOf[uuid].length === 0) leaves.push(uuid);
   }
   return leaves;
+}
+
+// True when the entry carries no conversational text — only tool calls,
+// tool results, thinking, or attachments. These are hidden in compact mode
+// for linear sources (cursor / codex) so the "All" toggle has visible effect.
+function isAuxiliaryEntry(e: Entry): boolean {
+  if (e.kind === "user") {
+    if (typeof e.content === "string") return e.content.trim().length === 0;
+    const blocks = e.content as ContentBlock[];
+    if (blocks.length === 0) return true;
+    return blocks.every(
+      (b) => b.type !== "text" || !b.text || !b.text.trim()
+    );
+  }
+  if (e.kind === "assistant") {
+    if (e.content.length === 0) return true;
+    return e.content.every(
+      (b) => b.type !== "text" || !b.text || !b.text.trim()
+    );
+  }
+  return false;
 }

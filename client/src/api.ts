@@ -6,6 +6,14 @@ import type {
   SearchHit,
 } from "./types";
 
+export type Source = "claude" | "cursor" | "codex";
+
+function withSource(url: string, source: Source): string {
+  if (source === "claude") return url; // keep default URLs clean
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}source=${source}`;
+}
+
 async function j<T>(url: string): Promise<T> {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -16,9 +24,16 @@ async function j<T>(url: string): Promise<T> {
 // though the server meant them as the same node. Rebuild byUuid from entries
 // so both sides share a single reference per entry — cuts ~half the transcript
 // memory for long sessions.
-async function loadTranscript(projectId: string, sessionId: string): Promise<Transcript> {
+async function loadTranscript(
+  projectId: string,
+  sessionId: string,
+  source: Source
+): Promise<Transcript> {
   const t = await j<Transcript>(
-    `/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`
+    withSource(
+      `/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`,
+      source
+    )
   );
   const byUuid: Record<string, Entry> = {};
   for (const e of t.entries) byUuid[e.uuid] = e;
@@ -55,19 +70,35 @@ async function patch(url: string, body: unknown): Promise<void> {
 }
 
 export const api = {
-  projects: () => j<ProjectSummary[]>("/api/projects"),
-  sessions: (projectId: string) =>
-    j<SessionSummary[]>(`/api/projects/${encodeURIComponent(projectId)}/sessions`),
+  projects: (source: Source = "claude") =>
+    j<ProjectSummary[]>(withSource("/api/projects", source)),
+  sessions: (projectId: string, source: Source = "claude") =>
+    j<SessionSummary[]>(
+      withSource(`/api/projects/${encodeURIComponent(projectId)}/sessions`, source)
+    ),
   session: loadTranscript,
-  search: (q: string) =>
-    j<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}`),
-  deleteProject: (projectId: string) =>
-    del(`/api/projects/${encodeURIComponent(projectId)}`),
-  deleteSession: (projectId: string, sessionId: string) =>
-    del(`/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`),
-  renameSession: (projectId: string, sessionId: string, customTitle: string) =>
+  search: (q: string, source: Source = "claude") =>
+    j<SearchHit[]>(withSource(`/api/search?q=${encodeURIComponent(q)}`, source)),
+  deleteProject: (projectId: string, source: Source = "claude") =>
+    del(withSource(`/api/projects/${encodeURIComponent(projectId)}`, source)),
+  deleteSession: (projectId: string, sessionId: string, source: Source = "claude") =>
+    del(
+      withSource(
+        `/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`,
+        source
+      )
+    ),
+  renameSession: (
+    projectId: string,
+    sessionId: string,
+    customTitle: string,
+    source: Source = "claude"
+  ) =>
     patch(
-      `/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`,
+      withSource(
+        `/api/sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`,
+        source
+      ),
       { customTitle }
     ),
 };
