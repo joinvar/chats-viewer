@@ -42,8 +42,10 @@ export function TranscriptView(props: {
   scrollToUuid: string | null;
   onConsumedScroll: () => void;
   source?: Source;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
-  const { transcript, scrollToUuid, onConsumedScroll, source } = props;
+  const { transcript, scrollToUuid, onConsumedScroll, source, onRefresh, refreshing } = props;
   const { entries, byUuid, childrenOf, roots } = transcript;
 
   const [showTree, setShowTree] = useState(() => loadViewMode().showTree);
@@ -112,16 +114,21 @@ export function TranscriptView(props: {
   }
 
   // Default selection: newest leaf by timestamp along the main chain.
+  // On refresh, keep the user's current branch: if the previous selection is
+  // still a leaf, nothing moves; if new messages were appended below it we
+  // follow the chain down to the new leaf so they render at the end without
+  // jumping the user to an unrelated branch. Only when the previous selection
+  // no longer exists (session switch) do we fall back to the newest leaf.
   useEffect(() => {
-    const leaves = findLeaves(childrenOf, byUuid);
-    if (leaves.length === 0) {
-      setSelectedLeaf(null);
-      return;
-    }
-    leaves.sort((a, b) =>
-      (byUuid[b]?.timestamp ?? "").localeCompare(byUuid[a]?.timestamp ?? "")
-    );
-    setSelectedLeaf(leaves[0]);
+    setSelectedLeaf((prev) => {
+      if (prev && byUuid[prev]) return descendToLeaf(prev);
+      const leaves = findLeaves(childrenOf, byUuid);
+      if (leaves.length === 0) return null;
+      leaves.sort((a, b) =>
+        (byUuid[b]?.timestamp ?? "").localeCompare(byUuid[a]?.timestamp ?? "")
+      );
+      return leaves[0];
+    });
   }, [transcript]);
 
   // cursor/codex sessions are inherently linear (no branching), so "All"
@@ -207,6 +214,17 @@ export function TranscriptView(props: {
           <CopyResume sessionId={transcript.meta.sessionId} source={source} />
         </div>
         <div className="transcript-actions">
+          {onRefresh && (
+            <button
+              className="toggle refresh-btn"
+              onClick={onRefresh}
+              disabled={refreshing}
+              title="重新加载当前对话"
+            >
+              <span className={"refresh-icon" + (refreshing ? " spinning" : "")}>↻</span>
+              {refreshing ? " 刷新中" : " 刷新"}
+            </button>
+          )}
           <button
             className={"toggle" + (showAll ? " on" : "")}
             onClick={toggleShowAll}

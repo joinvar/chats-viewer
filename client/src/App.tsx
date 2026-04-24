@@ -67,6 +67,7 @@ export default function App() {
   const [scrollToUuid, setScrollToUuid] = useState<string | null>(null);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
+  const [refreshingTranscript, setRefreshingTranscript] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [widths, setWidths] = useState(loadWidths);
@@ -252,6 +253,33 @@ export default function App() {
     };
   }, [projectId, sessionId, sessionsData, source]);
 
+  async function refreshTranscript() {
+    if (!projectId || !sessionId) return;
+    const currentProjectId = projectId;
+    const currentSessionId = sessionId;
+    const currentSource = source;
+    setRefreshingTranscript(true);
+    try {
+      // Only refetch the transcript — do NOT touch sessionsData here, because
+      // the (projectId, sessionId, sessionsData, source) effect would see a
+      // new sessionsData reference, call setTranscript(null), and reload from
+      // scratch, losing scroll position and selected branch.
+      const t = await api.session(currentProjectId, currentSessionId, currentSource);
+      if (
+        projectId !== currentProjectId ||
+        sessionId !== currentSessionId ||
+        source !== currentSource
+      ) {
+        return;
+      }
+      setTranscript(t);
+    } catch (e) {
+      setError(`刷新失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRefreshingTranscript(false);
+    }
+  }
+
   function openSearchHit(hit: SearchHit) {
     // Order matters slightly: set sessionId first so the sessions-load effect
     // can preserve it after the new project's list arrives.
@@ -362,6 +390,8 @@ export default function App() {
               scrollToUuid={scrollToUuid}
               onConsumedScroll={() => setScrollToUuid(null)}
               source={source}
+              onRefresh={refreshTranscript}
+              refreshing={refreshingTranscript}
             />
           )}
         </main>

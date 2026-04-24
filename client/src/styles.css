@@ -480,6 +480,24 @@ body.col-resizing * {
   box-shadow: 0 0 0 3px rgba(176, 70, 63, 0.18);
 }
 
+.toggle.refresh-btn[disabled] {
+  cursor: default;
+  opacity: 0.7;
+}
+.refresh-icon {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+  transform: translateY(0.5px);
+}
+.refresh-icon.spinning {
+  animation: refresh-spin 0.8s linear infinite;
+}
+@keyframes refresh-spin {
+  from { transform: translateY(0.5px) rotate(0deg); }
+  to   { transform: translateY(0.5px) rotate(360deg); }
+}
+
 /* List rows in danger mode get a subtle red wash */
 .list-item-row {
   display: flex;
