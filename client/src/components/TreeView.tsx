@@ -32,6 +32,7 @@ export function TreeView(props: {
     const toolResult = isToolResultEntry(e);
     return (
       <button
+        id={"tn-" + uuid}
         className={
           "tree-node" +
           (selected ? " selected" : "") +

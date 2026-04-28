@@ -261,11 +261,18 @@ export function TranscriptView(props: {
       setSelectedLeaf(descendToLeaf(scrollToUuid));
       return;
     }
+    // Sync the tree highlight to the search-hit node so it gets the orange
+    // selection bar in addition to the on-path styling.
+    setClickedNode(scrollToUuid);
     const el = document.getElementById("e-" + scrollToUuid);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.classList.add("flash");
       setTimeout(() => el.classList.remove("flash"), 1600);
+    }
+    const treeEl = document.getElementById("tn-" + scrollToUuid);
+    if (treeEl) {
+      treeEl.scrollIntoView({ behavior: "smooth", block: "center" });
     }
     onConsumedScroll();
   }, [scrollToUuid, pathEntries, byUuid, showAll, isLinearSource, selectedLeaf]);
