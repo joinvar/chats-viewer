@@ -7,3 +7,4 @@ dist/
 *.stackdump
 *.tsbuildinfo
 .claude/settings.local.json
+.playwright-mcp/
