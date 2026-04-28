@@ -69,6 +69,7 @@ export default function App() {
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [refreshingTranscript, setRefreshingTranscript] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [widths, setWidths] = useState(loadWidths);
   const [vis, setVis] = useState(loadVis);
@@ -340,7 +341,12 @@ export default function App() {
             ⚠ 危险模式{dangerMode ? "·开" : ""}
           </button>
         </div>
-        <SearchBar source={source} onOpenHit={openSearchHit} />
+        <SearchBar
+          source={source}
+          onOpenHit={openSearchHit}
+          projects={projects}
+          onQueryChange={setSearchQuery}
+        />
       </header>
       {error && (
         <div className="error-banner">
@@ -392,6 +398,7 @@ export default function App() {
               source={source}
               onRefresh={refreshTranscript}
               refreshing={refreshingTranscript}
+              searchQuery={searchQuery}
             />
           )}
         </main>

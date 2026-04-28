@@ -44,8 +44,9 @@ export function TranscriptView(props: {
   source?: Source;
   onRefresh?: () => void;
   refreshing?: boolean;
+  searchQuery?: string;
 }) {
-  const { transcript, scrollToUuid, onConsumedScroll, source, onRefresh, refreshing } = props;
+  const { transcript, scrollToUuid, onConsumedScroll, source, onRefresh, refreshing, searchQuery } = props;
   const { entries, byUuid, childrenOf, roots } = transcript;
 
   const [showTree, setShowTree] = useState(() => loadViewMode().showTree);
@@ -155,8 +156,111 @@ export function TranscriptView(props: {
   }, [entries, byUuid, selectedLeaf, showAll, isLinearSource]);
 
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
+
+  // Highlight `searchQuery` everywhere it appears in the transcript body
+  // (including inside markdown / code blocks). Uses CSS Custom Highlight API
+  // so we don't rewrite the DOM — Range objects on text nodes plus a
+  // ::highlight() pseudo-element. Re-runs on query change, branch path
+  // change, AND any DOM mutation in the host (so expanding a collapsed tool
+  // result re-applies highlights to the newly mounted text).
+  useEffect(() => {
+    const root = scrollHostRef.current;
+    const w = window as unknown as {
+      Highlight?: typeof Highlight;
+      CSS?: { highlights?: Map<string, Highlight> };
+    };
+    const HighlightCtor = w.Highlight!;
+    const registry = w.CSS?.highlights;
+    if (!root || !w.Highlight || !registry) return;
+
+    const q = (searchQuery ?? "").trim();
+
+    function apply() {
+      if (!root) {
+        registry?.delete("chats-search");
+        return;
+      }
+      if (!q || q.length < 2) {
+        registry?.delete("chats-search");
+        return;
+      }
+      const ql = q.toLowerCase();
+      const ranges: Range[] = [];
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          // Skip text inside <script> / <style>, and empty whitespace nodes.
+          const p = node.parentElement;
+          if (!p) return NodeFilter.FILTER_REJECT;
+          const tag = p.tagName;
+          if (tag === "SCRIPT" || tag === "STYLE") return NodeFilter.FILTER_REJECT;
+          if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const text = node.nodeValue || "";
+        const tl = text.toLowerCase();
+        let i = 0;
+        while (true) {
+          const j = tl.indexOf(ql, i);
+          if (j < 0) break;
+          try {
+            const range = document.createRange();
+            range.setStart(node, j);
+            range.setEnd(node, j + ql.length);
+            ranges.push(range);
+          } catch {
+            // ignore — node may have been re-rendered between walk and range
+          }
+          i = j + ql.length;
+        }
+      }
+      if (ranges.length > 0) {
+        registry?.set("chats-search", new HighlightCtor(...ranges));
+      } else {
+        registry?.delete("chats-search");
+      }
+    }
+
+    apply();
+
+    // Re-apply when any descendant text changes (e.g. tool result expand).
+    let raf = 0;
+    const obs = new MutationObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(apply);
+    });
+    obs.observe(root, { childList: true, subtree: true, characterData: true });
+    return () => {
+      obs.disconnect();
+      cancelAnimationFrame(raf);
+      registry?.delete("chats-search");
+    };
+  }, [searchQuery, pathEntries]);
+
   useEffect(() => {
     if (!scrollToUuid) return;
+    // Target entry not loaded yet (transcript still fetching). Wait — the
+    // effect will re-run when pathEntries changes after load.
+    if (!byUuid[scrollToUuid]) return;
+    // Don't scroll while selectedLeaf is still null — that's the initial
+    // mount window where pathEntries falls back to *all* nonSide entries
+    // (see the "if (!selectedLeaf) return nonSide" branch). Scrolling now
+    // would hit the target, but milliseconds later transcript-init sets
+    // selectedLeaf to the newest leaf, pathEntries shrinks to that branch's
+    // chain, the target entry unmounts, and the scroll position is lost.
+    // Wait one render — once selectedLeaf is set, decide whether to keep it
+    // or switch leaves so the target stays mounted.
+    if (!isLinearSource && selectedLeaf === null) return;
+    // Search hits can land on an off-branch entry. The default selectedLeaf
+    // is the newest leaf, so the entry's row may not be rendered at all.
+    // Switch the branch to a leaf that descends from the target before
+    // attempting the scroll; the effect re-runs once pathEntries updates.
+    if (!showAll && !isLinearSource && !pathEntries.some((e) => e.uuid === scrollToUuid)) {
+      setSelectedLeaf(descendToLeaf(scrollToUuid));
+      return;
+    }
     const el = document.getElementById("e-" + scrollToUuid);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -164,7 +268,7 @@ export function TranscriptView(props: {
       setTimeout(() => el.classList.remove("flash"), 1600);
     }
     onConsumedScroll();
-  }, [scrollToUuid, pathEntries]);
+  }, [scrollToUuid, pathEntries, byUuid, showAll, isLinearSource, selectedLeaf]);
 
   // Scroll to the node clicked in the tree (separate from external scrollToUuid).
   useEffect(() => {

@@ -77,8 +77,11 @@ export const api = {
       withSource(`/api/projects/${encodeURIComponent(projectId)}/sessions`, source)
     ),
   session: loadTranscript,
-  search: (q: string, source: Source = "claude") =>
-    j<SearchHit[]>(withSource(`/api/search?q=${encodeURIComponent(q)}`, source)),
+  search: (q: string, source: Source = "claude", projectId?: string) => {
+    let url = `/api/search?q=${encodeURIComponent(q)}`;
+    if (projectId) url += `&projectId=${encodeURIComponent(projectId)}`;
+    return j<SearchHit[]>(withSource(url, source));
+  },
   deleteProject: (projectId: string, source: Source = "claude") =>
     del(withSource(`/api/projects/${encodeURIComponent(projectId)}`, source)),
   deleteSession: (projectId: string, sessionId: string, source: Source = "claude") =>

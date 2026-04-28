@@ -212,7 +212,8 @@ function extractText(e: Entry): string {
 export async function search(
   q: string,
   limit = 100,
-  source: SearchSource = "claude"
+  source: SearchSource = "claude",
+  projectId?: string
 ): Promise<SearchHit[]> {
   await ensureIndex(source);
   const ql = q.toLowerCase();
@@ -220,11 +221,15 @@ export async function search(
   const idx = indexes[source];
   const hits: SearchHit[] = [];
   for (const r of idx.rows) {
+    if (projectId && r.projectId !== projectId) continue;
     const i = r.textLower.indexOf(ql);
     if (i < 0) continue;
     const start = Math.max(0, i - 80);
     const end = Math.min(r.text.length, i + ql.length + 80);
-    let snippet = r.text.slice(start, end);
+    // Collapse all whitespace (including newlines) to single spaces so the
+    // matched word stays visible in a 2-line clamped snippet — otherwise
+    // newlines in the leading 80 chars push the match out of view.
+    let snippet = r.text.slice(start, end).replace(/\s+/g, " ").trim();
     if (start > 0) snippet = "…" + snippet;
     if (end < r.text.length) snippet = snippet + "…";
     const metaKey = `${r.projectId}::${r.sessionId}`;
@@ -239,7 +244,10 @@ export async function search(
       customTitle: m.customTitle,
       cwd: m.cwd,
     });
-    if (hits.length >= limit) break;
   }
-  return hits;
+  // Newest first. Timestamps are ISO strings so lexicographic compare is
+  // chronological. Sort *after* collecting all hits — we can't break early
+  // anymore, otherwise the limit cap would silently drop the freshest matches.
+  hits.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
+  return hits.slice(0, limit);
 }

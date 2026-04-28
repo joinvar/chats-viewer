@@ -156,7 +156,8 @@ app.get("/api/search", async (req, res) => {
   try {
     const q = String(req.query.q ?? "");
     const src = pickSource(req);
-    res.json(await search(q, 100, src));
+    const projectId = req.query.projectId ? String(req.query.projectId) : undefined;
+    res.json(await search(q, 100, src, projectId));
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }
