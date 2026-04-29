@@ -113,6 +113,7 @@ export function TranscriptView(props: {
   const [selectedLeaf, setSelectedLeaf] = useState<string | null>(null);
   const [clickedNode, setClickedNode] = useState<string | null>(null);
   const [innerScroll, setInnerScroll] = useState<string | null>(null);
+  const [trackedUuid, setTrackedUuid] = useState<string | null>(null);
 
   function descendToLeaf(start: string): string {
     let cur = start;
@@ -319,7 +320,7 @@ export function TranscriptView(props: {
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.classList.add("flash");
-      setTimeout(() => el.classList.remove("flash"), 1600);
+      setTimeout(() => el.classList.remove("flash"), 3600);
     }
     const treeEl = document.getElementById("tn-" + scrollToUuid);
     if (treeEl) {
@@ -388,6 +389,54 @@ export function TranscriptView(props: {
     };
   }, [transcript]);
 
+  // Track which entry currently anchors the top of the right pane, so the
+  // tree can highlight the matching node and follow as the user scrolls.
+  // We pick the last entry whose top has crossed an anchor line ~80px below
+  // the host's top edge — that's the entry the user is "reading".
+  useEffect(() => {
+    const host = entriesScrollRef.current;
+    if (!host) return;
+    let raf = 0;
+    function update() {
+      raf = 0;
+      if (!host) return;
+      const kids = host.children;
+      const anchor = 80;
+      let pickId: string | null = null;
+      for (let i = 0; i < kids.length; i++) {
+        const el = kids[i] as HTMLElement;
+        if (!el.id || !el.id.startsWith("e-")) continue;
+        const top = el.offsetTop - host.scrollTop;
+        if (top <= anchor) pickId = el.id;
+        else break;
+      }
+      if (!pickId && kids.length > 0) {
+        const first = kids[0] as HTMLElement;
+        if (first.id?.startsWith("e-")) pickId = first.id;
+      }
+      const next = pickId ? pickId.slice(2) : null;
+      setTrackedUuid((prev) => (prev === next ? prev : next));
+    }
+    function onScroll() {
+      if (raf) return;
+      raf = requestAnimationFrame(update);
+    }
+    update();
+    host.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      host.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [pathEntries, showTree]);
+
+  // Keep the tracked tree node visible inside the tree panel — only scrolls
+  // when the node has actually left the visible area (block: "nearest").
+  useEffect(() => {
+    if (!trackedUuid || !showTree) return;
+    const treeEl = document.getElementById("tn-" + trackedUuid);
+    treeEl?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [trackedUuid, showTree]);
+
   // Scroll to the node clicked in the tree (separate from external scrollToUuid).
   useEffect(() => {
     if (!innerScroll) return;
@@ -395,7 +444,7 @@ export function TranscriptView(props: {
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.classList.add("flash");
-      setTimeout(() => el.classList.remove("flash"), 1600);
+      setTimeout(() => el.classList.remove("flash"), 3600);
     }
     setInnerScroll(null);
   }, [innerScroll, pathEntries]);
@@ -471,6 +520,7 @@ export function TranscriptView(props: {
                 transcript={transcript}
                 selectedUuid={selectedLeaf}
                 clickedUuid={clickedNode}
+                trackedUuid={trackedUuid}
                 onSelect={handleTreeSelect}
               />
             </div>

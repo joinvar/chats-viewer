@@ -19,7 +19,8 @@
   --border: #d8d3bf;
   --border-soft: #e7e2ce;
   --selected: #ece1c8;
-  --flash: #f0dcae;
+  --flash: #e3b25c;
+  --track: #c96442;
   --splitter: #e7e2ce;
   --splitter-hover: #c96442;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
@@ -631,6 +632,25 @@ body.col-resizing * {
 .tree-node.off-path .tn-dot {
   opacity: 0.45;
 }
+/* Tracking: the entry currently anchored at the top of the right pane.
+   Wins over .selected so the indicator stays unambiguous while scrolling. */
+.tree-node.tracking,
+.tree-node.tracking.selected,
+.tree-node.tracking.off-path,
+.tree-node.tracking:has(.tn-user):not(.is-tool-result) {
+  background: rgba(201, 100, 66, 0.22);
+  box-shadow: inset 3px 0 0 var(--track);
+  color: var(--fg);
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+.tree-node.tracking .preview {
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+.tree-node.tracking .tn-dot {
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(201, 100, 66, 0.35);
+}
 .tree-node .preview {
   flex: 1 1 auto;
   min-width: 0;
@@ -717,10 +737,11 @@ body.col-resizing * {
   flex-direction: column;
 }
 .entry.flash {
-  animation: flashPulse 1.6s ease-out;
+  animation: flashPulse 3.6s ease-out;
 }
 @keyframes flashPulse {
-  0% { background: var(--flash); }
+  0%   { background: var(--flash); }
+  20%  { background: var(--flash); }
   100% { background: transparent; }
 }
 

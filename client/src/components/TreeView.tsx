@@ -6,9 +6,10 @@ export function TreeView(props: {
   transcript: Transcript;
   selectedUuid: string | null;
   clickedUuid?: string | null;
+  trackedUuid?: string | null;
   onSelect: (uuid: string) => void;
 }) {
-  const { transcript, selectedUuid, clickedUuid, onSelect } = props;
+  const { transcript, selectedUuid, clickedUuid, trackedUuid, onSelect } = props;
   const { roots, childrenOf, byUuid } = transcript;
   const highlightUuid = clickedUuid ?? selectedUuid;
 
@@ -29,6 +30,7 @@ export function TreeView(props: {
     const kids = childrenOf[uuid] ?? [];
     const onPath = pathSet.has(uuid);
     const selected = uuid === highlightUuid;
+    const tracking = uuid === trackedUuid;
     const toolResult = isToolResultEntry(e);
     return (
       <button
@@ -36,6 +38,7 @@ export function TreeView(props: {
         className={
           "tree-node" +
           (selected ? " selected" : "") +
+          (tracking ? " tracking" : "") +
           (onPath ? " on-path" : " off-path") +
           (isBranchPoint ? " branch" : "") +
           (toolResult ? " is-tool-result" : "")
