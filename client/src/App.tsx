@@ -13,6 +13,38 @@ const MAX_FRAC = 0.6; // no single side column wider than 60% of viewport
 const STORAGE_KEY = "chats-viewer:col-widths";
 const VIS_KEY = "chats-viewer:col-visible";
 const SOURCE_KEY = "chats-viewer:source";
+const SELECTION_KEY = "chats-viewer:selection";
+
+type Selection = { projectId: string | null; sessionId: string | null };
+type SelectionMap = Partial<Record<Source, Selection>>;
+
+function loadSelectionMap(): SelectionMap {
+  try {
+    const s = localStorage.getItem(SELECTION_KEY);
+    if (s) {
+      const o = JSON.parse(s);
+      if (o && typeof o === "object") return o as SelectionMap;
+    }
+  } catch {}
+  return {};
+}
+
+function loadSelection(source: Source): Selection {
+  const m = loadSelectionMap();
+  const e = m[source];
+  return {
+    projectId: typeof e?.projectId === "string" ? e.projectId : null,
+    sessionId: typeof e?.sessionId === "string" ? e.sessionId : null,
+  };
+}
+
+function saveSelection(source: Source, sel: Selection) {
+  try {
+    const m = loadSelectionMap();
+    m[source] = sel;
+    localStorage.setItem(SELECTION_KEY, JSON.stringify(m));
+  } catch {}
+}
 
 function loadWidths(): { a: number; b: number } {
   try {
@@ -56,13 +88,17 @@ function sourceTitle(source: Source): string {
 export default function App() {
   const [source, setSource] = useState<Source>(loadSource);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(
+    () => loadSelection(loadSource()).projectId
+  );
   const [sessionsData, setSessionsData] = useState<{
     projectId: string;
     source: Source;
     items: SessionSummary[];
   } | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(
+    () => loadSelection(loadSource()).sessionId
+  );
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [scrollToUuid, setScrollToUuid] = useState<string | null>(null);
   const [loadingSessions, setLoadingSessions] = useState(false);
@@ -90,12 +126,15 @@ export default function App() {
   function switchSource(next: Source) {
     if (next === source) return;
     // Swapping data sources invalidates everything that was keyed by id —
-    // projectId / sessionId are not comparable between sources.
+    // projectId / sessionId are not comparable between sources. But each
+    // source has its own persisted selection, so restore the new source's
+    // last (project, session) instead of forcing the user to start over.
+    const sel = loadSelection(next);
     setSource(next);
     setProjects([]);
-    setProjectId(null);
+    setProjectId(sel.projectId);
     setSessionsData(null);
-    setSessionId(null);
+    setSessionId(sel.sessionId);
     setTranscript(null);
     setError(null);
     try {
@@ -200,12 +239,28 @@ export default function App() {
     let cancelled = false;
     api
       .projects(source)
-      .then((ps) => !cancelled && setProjects(ps))
+      .then((ps) => {
+        if (cancelled) return;
+        setProjects(ps);
+        // Drop a persisted projectId that no longer exists for this source —
+        // otherwise the sessions fetch 404s and the error banner shows on
+        // every reload after a project is deleted.
+        setProjectId((prev) => {
+          if (!prev) return prev;
+          return ps.some((p) => p.id === prev) ? prev : null;
+        });
+      })
       .catch((e) => !cancelled && setError(String(e)));
     return () => {
       cancelled = true;
     };
   }, [source]);
+
+  // Persist the current (project, session) per source so reload / source
+  // switch restores it. Writes are tiny and infrequent (one per click).
+  useEffect(() => {
+    saveSelection(source, { projectId, sessionId });
+  }, [source, projectId, sessionId]);
 
   useEffect(() => {
     if (!projectId) return;

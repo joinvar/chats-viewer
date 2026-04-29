@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Transcript, Entry, ContentBlock } from "../types";
 import { EntryView } from "./Entry";
 import { TreeView } from "./TreeView";
@@ -9,8 +9,41 @@ import type { Source } from "../api";
 
 const TREE_W_KEY = "chats-viewer:tree-width";
 const VIEW_MODE_KEY = "chats-viewer:view-mode";
+const BRANCH_KEY = "chats-viewer:branch";
+const SCROLL_KEY = "chats-viewer:scroll";
+const PER_SESSION_CAP = 50;
 const TREE_MIN = 180;
 const TREE_DEFAULT = 320;
+
+// Per-session maps — branch leaf and scroll position. Capped insertion-order
+// LRU so localStorage doesn't grow forever as the user opens new sessions.
+function loadSessionMap<T>(key: string): Record<string, T> {
+  try {
+    const s = localStorage.getItem(key);
+    if (s) {
+      const o = JSON.parse(s);
+      if (o && typeof o === "object") return o as Record<string, T>;
+    }
+  } catch {}
+  return {};
+}
+
+function saveSessionEntry<T>(key: string, sessionId: string, value: T) {
+  try {
+    const m = loadSessionMap<T>(key);
+    delete m[sessionId];
+    m[sessionId] = value;
+    const keys = Object.keys(m);
+    if (keys.length > PER_SESSION_CAP) {
+      for (const k of keys.slice(0, keys.length - PER_SESSION_CAP)) delete m[k];
+    }
+    localStorage.setItem(key, JSON.stringify(m));
+  } catch {}
+}
+
+function loadSessionEntry<T>(key: string, sessionId: string): T | undefined {
+  return loadSessionMap<T>(key)[sessionId];
+}
 
 function loadTreeWidth(): number {
   try {
@@ -118,11 +151,17 @@ export function TranscriptView(props: {
   // On refresh, keep the user's current branch: if the previous selection is
   // still a leaf, nothing moves; if new messages were appended below it we
   // follow the chain down to the new leaf so they render at the end without
-  // jumping the user to an unrelated branch. Only when the previous selection
-  // no longer exists (session switch) do we fall back to the newest leaf.
+  // jumping the user to an unrelated branch. On a fresh mount (session
+  // switch) we first try the persisted leaf for this sessionId; if that
+  // uuid is gone we fall back to the newest leaf.
   useEffect(() => {
     setSelectedLeaf((prev) => {
       if (prev && byUuid[prev]) return descendToLeaf(prev);
+      const persisted = loadSessionEntry<string>(
+        BRANCH_KEY,
+        transcript.meta.sessionId
+      );
+      if (persisted && byUuid[persisted]) return descendToLeaf(persisted);
       const leaves = findLeaves(childrenOf, byUuid);
       if (leaves.length === 0) return null;
       leaves.sort((a, b) =>
@@ -131,6 +170,13 @@ export function TranscriptView(props: {
       return leaves[0];
     });
   }, [transcript]);
+
+  // Persist the leaf the user is currently viewing so reloading or
+  // re-entering the session lands on the same branch.
+  useEffect(() => {
+    if (!selectedLeaf) return;
+    saveSessionEntry<string>(BRANCH_KEY, transcript.meta.sessionId, selectedLeaf);
+  }, [selectedLeaf, transcript]);
 
   // cursor/codex sessions are inherently linear (no branching), so "All"
   // toggles compact vs full instead of branch-path vs all-branches:
@@ -156,6 +202,11 @@ export function TranscriptView(props: {
   }, [entries, byUuid, selectedLeaf, showAll, isLinearSource]);
 
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
+  // The actual scrolling element is `.entries` (the flex column inside the
+  // body — the body itself is overflow:hidden so the tree panel and entries
+  // can scroll independently). scrollHostRef is kept on `.transcript-body`
+  // because the highlight walker wants to span both panels.
+  const entriesScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Highlight `searchQuery` everywhere it appears in the transcript body
   // (including inside markdown / code blocks). Uses CSS Custom Highlight API
@@ -277,6 +328,66 @@ export function TranscriptView(props: {
     onConsumedScroll();
   }, [scrollToUuid, pathEntries, byUuid, showAll, isLinearSource, selectedLeaf]);
 
+  // Restore scroll position once per session, after pathEntries has settled
+  // (selectedLeaf is the persisted/initial value, not the transient null).
+  // Search-hit navigation owns scrolling for that load — we mark this session
+  // restored so the persisted scroll doesn't fight scrollIntoView.
+  const restoredScrollRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const sid = transcript.meta.sessionId;
+    if (restoredScrollRef.current === sid) return;
+    if (!isLinearSource && (!selectedLeaf || !byUuid[selectedLeaf])) return;
+    if (scrollToUuid) {
+      restoredScrollRef.current = sid;
+      return;
+    }
+    const host = entriesScrollRef.current;
+    if (!host) return;
+    const top = loadSessionEntry<number>(SCROLL_KEY, sid);
+    if (typeof top === "number" && Number.isFinite(top)) {
+      host.scrollTop = top;
+    }
+    // The tree panel has its own scrollbar — without this it would still be
+    // pinned to the top after reload even though the leaf is highlighted
+    // somewhere far down.
+    if (selectedLeaf) {
+      const treeEl = document.getElementById("tn-" + selectedLeaf);
+      treeEl?.scrollIntoView({ block: "center" });
+    }
+    restoredScrollRef.current = sid;
+  }, [transcript, selectedLeaf, byUuid, scrollToUuid, isLinearSource, pathEntries]);
+
+  // Persist scroll position (debounced) so the next visit lands where the
+  // user left off. Cleanup flushes the latest value when the transcript
+  // changes or the component unmounts.
+  useEffect(() => {
+    const host = entriesScrollRef.current;
+    if (!host) return;
+    const sid = transcript.meta.sessionId;
+    let timer: number | null = null;
+    function onScroll() {
+      // Skip writes until the initial restore for this session has happened —
+      // otherwise the listener can save scrollTop=0 from the brief pre-restore
+      // frame and clobber the persisted position.
+      if (restoredScrollRef.current !== sid) return;
+      if (timer != null) clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        if (host) saveSessionEntry<number>(SCROLL_KEY, sid, host.scrollTop);
+      }, 200);
+    }
+    host.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      host.removeEventListener("scroll", onScroll);
+      if (timer != null) {
+        clearTimeout(timer);
+        if (restoredScrollRef.current === sid) {
+          saveSessionEntry<number>(SCROLL_KEY, sid, host.scrollTop);
+        }
+      }
+    };
+  }, [transcript]);
+
   // Scroll to the node clicked in the tree (separate from external scrollToUuid).
   useEffect(() => {
     if (!innerScroll) return;
@@ -366,7 +477,7 @@ export function TranscriptView(props: {
             <Splitter onDrag={resizeTree} onEnd={persistTreeWidth} />
           </>
         )}
-        <div className="entries">
+        <div className="entries" ref={entriesScrollRef}>
           {pathEntries.map((e) => (
             <EntryView key={e.uuid} transcript={transcript} entry={e} />
           ))}
