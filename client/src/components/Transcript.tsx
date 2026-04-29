@@ -78,35 +78,42 @@ export function TranscriptView(props: {
   onRefresh?: () => void;
   refreshing?: boolean;
   searchQuery?: string;
+  chromeHidden?: boolean;
+  onToggleChrome?: () => void;
 }) {
-  const { transcript, scrollToUuid, onConsumedScroll, source, onRefresh, refreshing, searchQuery } = props;
+  const {
+    transcript,
+    scrollToUuid,
+    onConsumedScroll,
+    source,
+    onRefresh,
+    refreshing,
+    searchQuery,
+    chromeHidden,
+    onToggleChrome,
+  } = props;
   const { entries, byUuid, childrenOf, roots } = transcript;
 
   const [showTree, setShowTree] = useState(() => loadViewMode().showTree);
   const [showAll, setShowAll] = useState(() => loadViewMode().showAll);
   const [treeWidth, setTreeWidth] = useState(loadTreeWidth);
 
+  function persistViewMode(next: { showAll: boolean; showTree: boolean }) {
+    try {
+      localStorage.setItem(VIEW_MODE_KEY, JSON.stringify(next));
+    } catch {}
+  }
   function toggleShowAll() {
     setShowAll((v) => {
       const next = !v;
-      try {
-        localStorage.setItem(
-          VIEW_MODE_KEY,
-          JSON.stringify({ showAll: next, showTree })
-        );
-      } catch {}
+      persistViewMode({ showAll: next, showTree });
       return next;
     });
   }
   function toggleShowTree() {
     setShowTree((v) => {
       const next = !v;
-      try {
-        localStorage.setItem(
-          VIEW_MODE_KEY,
-          JSON.stringify({ showAll, showTree: next })
-        );
-      } catch {}
+      persistViewMode({ showAll, showTree: next });
       return next;
     });
   }
@@ -465,53 +472,64 @@ export function TranscriptView(props: {
 
   return (
     <div className="transcript">
-      <div className="transcript-head">
-        <div className="transcript-title">
-          {transcript.meta.customTitle ||
-            transcript.meta.agentName ||
-            transcript.meta.sessionId.slice(0, 8)}
-        </div>
-        <div className="transcript-sub">
-          {transcript.meta.cwd && <span>{transcript.meta.cwd}</span>}
-          {transcript.meta.gitBranch && (
-            <span> · {transcript.meta.gitBranch}</span>
-          )}
-          {transcript.meta.startedAt && (
-            <span> · {formatTime(transcript.meta.startedAt)}</span>
-          )}
-          <span> · {transcript.meta.messageCount} messages</span>
-        </div>
-        <div className="transcript-resume">
-          <CopyResume sessionId={transcript.meta.sessionId} source={source} />
-        </div>
-        <div className="transcript-actions">
-          {onRefresh && (
+      {!chromeHidden && (
+        <div className="transcript-head">
+          <div className="transcript-title">
+            {transcript.meta.customTitle ||
+              transcript.meta.agentName ||
+              transcript.meta.sessionId.slice(0, 8)}
+          </div>
+          <div className="transcript-sub">
+            {transcript.meta.cwd && <span>{transcript.meta.cwd}</span>}
+            {transcript.meta.gitBranch && (
+              <span> · {transcript.meta.gitBranch}</span>
+            )}
+            {transcript.meta.startedAt && (
+              <span> · {formatTime(transcript.meta.startedAt)}</span>
+            )}
+            <span> · {transcript.meta.messageCount} messages</span>
+          </div>
+          <div className="transcript-resume">
+            <CopyResume sessionId={transcript.meta.sessionId} source={source} />
+          </div>
+          <div className="transcript-actions">
+            {onToggleChrome && (
+              <button
+                className="toggle head-collapse"
+                onClick={onToggleChrome}
+                title="进入沉浸模式（隐藏顶栏与会话头）"
+              >
+                ⤢
+              </button>
+            )}
+            {onRefresh && (
+              <button
+                className="toggle refresh-btn"
+                onClick={onRefresh}
+                disabled={refreshing}
+                title="重新加载当前对话"
+              >
+                <span className={"refresh-icon" + (refreshing ? " spinning" : "")}>↻</span>
+                {refreshing ? " 刷新中" : " 刷新"}
+              </button>
+            )}
             <button
-              className="toggle refresh-btn"
-              onClick={onRefresh}
-              disabled={refreshing}
-              title="重新加载当前对话"
+              className={"toggle" + (showAll ? " on" : "")}
+              onClick={toggleShowAll}
+              title={allTitle}
             >
-              <span className={"refresh-icon" + (refreshing ? " spinning" : "")}>↻</span>
-              {refreshing ? " 刷新中" : " 刷新"}
+              ≡ All {allHasEffect && <span className="dot">•</span>}
             </button>
-          )}
-          <button
-            className={"toggle" + (showAll ? " on" : "")}
-            onClick={toggleShowAll}
-            title={allTitle}
-          >
-            ≡ All {allHasEffect && <span className="dot">•</span>}
-          </button>
-          <button
-            className={"toggle" + (showTree ? " on" : "")}
-            onClick={toggleShowTree}
-            title="Toggle branch tree view"
-          >
-            ⎇ Tree {hasBranches && <span className="dot">•</span>}
-          </button>
+            <button
+              className={"toggle" + (showTree ? " on" : "")}
+              onClick={toggleShowTree}
+              title="Toggle branch tree view"
+            >
+              ⎇ Tree {hasBranches && <span className="dot">•</span>}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
       <div className="transcript-body" ref={scrollHostRef}>
         {showTree && (
           <>

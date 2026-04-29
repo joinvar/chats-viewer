@@ -313,6 +313,7 @@ body.col-resizing * {
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
 }
 .transcript-head {
   background: var(--bg);
@@ -322,6 +323,36 @@ body.col-resizing * {
   grid-template-columns: 1fr auto;
   gap: 4px 16px;
   align-items: center;
+}
+.toggle.head-collapse {
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1;
+}
+.chrome-restore-tab {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  padding: 3px 22px 5px 22px;
+  border-radius: 0 0 8px 8px;
+  border: 1px solid var(--border-soft);
+  border-top: none;
+  background: var(--bg);
+  color: var(--fg-mute);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+  transition: color 0.15s, border-color 0.15s, padding-bottom 0.15s,
+    background 0.15s;
+}
+.chrome-restore-tab:hover {
+  color: var(--accent);
+  border-color: rgba(201, 100, 66, 0.35);
+  background: var(--bubble);
+  padding-bottom: 8px;
 }
 .transcript-title {
   font-weight: 600;

@@ -14,6 +14,7 @@ const STORAGE_KEY = "chats-viewer:col-widths";
 const VIS_KEY = "chats-viewer:col-visible";
 const SOURCE_KEY = "chats-viewer:source";
 const SELECTION_KEY = "chats-viewer:selection";
+const CHROME_KEY = "chats-viewer:chrome-hidden";
 
 type Selection = { projectId: string | null; sessionId: string | null };
 type SelectionMap = Partial<Record<Source, Selection>>;
@@ -79,6 +80,14 @@ function loadSource(): Source {
   return "claude";
 }
 
+function loadChromeHidden(): boolean {
+  try {
+    return localStorage.getItem(CHROME_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function sourceTitle(source: Source): string {
   if (source === "cursor") return "Cursor";
   if (source === "codex") return "Codex";
@@ -112,6 +121,17 @@ export default function App() {
   // Danger mode is intentionally not persisted — it always starts off after a
   // refresh so destructive deletes can never be left armed by accident.
   const [dangerMode, setDangerMode] = useState(false);
+  const [chromeHidden, setChromeHidden] = useState(loadChromeHidden);
+
+  function toggleChrome() {
+    setChromeHidden((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(CHROME_KEY, next ? "1" : "0");
+      } catch {}
+      return next;
+    });
+  }
 
   function toggleVis(key: "projects" | "sessions") {
     setVis((v) => {
@@ -369,40 +389,51 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">chats viewer</div>
-        <SourceSelect value={source} onChange={switchSource} />
-        <div className="panel-toggles">
-          <button
-            className={"toggle" + (vis.projects ? " on" : "")}
-            onClick={() => toggleVis("projects")}
-            title="Toggle projects panel"
-          >
-            ▤ Projects
-          </button>
-          <button
-            className={"toggle" + (vis.sessions ? " on" : "")}
-            onClick={() => toggleVis("sessions")}
-            title="Toggle sessions panel"
-          >
-            ▤ Sessions
-          </button>
-          <button
-            className={"toggle danger" + (dangerMode ? " on" : "")}
-            onClick={() => setDangerMode((v) => !v)}
-            title="开启后可删除 project / session 源文件，且无法恢复"
-          >
-            ⚠ 危险模式{dangerMode ? "·开" : ""}
-          </button>
-        </div>
-        <SearchBar
-          source={source}
-          onOpenHit={openSearchHit}
-          projects={projects}
-          onQueryChange={setSearchQuery}
-        />
-      </header>
+    <div className={"app" + (chromeHidden ? " chrome-hidden" : "")}>
+      {!chromeHidden && (
+        <header className="topbar">
+          <div className="brand">chats viewer</div>
+          <SourceSelect value={source} onChange={switchSource} />
+          <div className="panel-toggles">
+            <button
+              className={"toggle" + (vis.projects ? " on" : "")}
+              onClick={() => toggleVis("projects")}
+              title="Toggle projects panel"
+            >
+              ▤ Projects
+            </button>
+            <button
+              className={"toggle" + (vis.sessions ? " on" : "")}
+              onClick={() => toggleVis("sessions")}
+              title="Toggle sessions panel"
+            >
+              ▤ Sessions
+            </button>
+            <button
+              className={"toggle danger" + (dangerMode ? " on" : "")}
+              onClick={() => setDangerMode((v) => !v)}
+              title="开启后可删除 project / session 源文件，且无法恢复"
+            >
+              ⚠ 危险模式{dangerMode ? "·开" : ""}
+            </button>
+          </div>
+          <SearchBar
+            source={source}
+            onOpenHit={openSearchHit}
+            projects={projects}
+            onQueryChange={setSearchQuery}
+          />
+        </header>
+      )}
+      {chromeHidden && (
+        <button
+          className="chrome-restore-tab"
+          onClick={toggleChrome}
+          title="退出沉浸模式（恢复顶栏与会话头）"
+        >
+          ▾
+        </button>
+      )}
       {error && (
         <div className="error-banner">
           {error} <button onClick={() => setError(null)}>x</button>
@@ -454,6 +485,8 @@ export default function App() {
               onRefresh={refreshTranscript}
               refreshing={refreshingTranscript}
               searchQuery={searchQuery}
+              chromeHidden={chromeHidden}
+              onToggleChrome={toggleChrome}
             />
           )}
         </main>
