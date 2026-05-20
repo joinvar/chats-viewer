@@ -140,11 +140,11 @@ export function TreeView(props: {
 
 // A run of consecutive pure-tool nodes inside a linear chain — collapsed
 // to "··· N 步" by default, matching the chat view's noise reduction.
-// Auto-expands once when the current selection / tracked node is inside
-// it so the user doesn't lose sight of where they are (ratchet — won't
-// re-collapse if the active node later moves out). Branch points are
-// never grouped — they carry navigation. Module-level so React preserves
-// its useState across TreeView re-renders.
+// Auto-expands once when the user actively lands on a node inside it
+// (selection / clicked), but NOT when the chat-scroll tracker passes
+// through — passive tracking should highlight the placeholder, not
+// disturb the user's collapse choice. Branch points are never grouped.
+// Module-level so React preserves its useState across TreeView re-renders.
 function ToolGroupNode({
   uuids,
   selectedUuid,
@@ -159,7 +159,7 @@ function ToolGroupNode({
   renderRow: (uuid: string) => JSX.Element;
 }) {
   const containsActive = uuids.some(
-    (u) => u === selectedUuid || u === clickedUuid || u === trackedUuid
+    (u) => u === selectedUuid || u === clickedUuid
   );
   const [userExpanded, setUserExpanded] = useState(false);
   const [autoExpanded, setAutoExpanded] = useState(containsActive);
@@ -184,9 +184,16 @@ function ToolGroupNode({
       </>
     );
   }
+  // tracking ⇒ chat scroll anchor is on one of our hidden members. Show
+  // the highlight on the placeholder so the user still sees where they
+  // are in the tree, without forcing the group open. data-uuids lets the
+  // parent's scrollIntoView fall back to this element when the actual
+  // tn-{uuid} isn't in the DOM.
+  const tracking = !!trackedUuid && uuids.includes(trackedUuid);
   return (
     <button
-      className="tree-node tree-group"
+      className={"tree-node tree-group" + (tracking ? " tracking" : "")}
+      data-uuids={uuids.join(" ")}
       onClick={() => setUserExpanded(true)}
       title={`${uuids.length} 步工具/系统 — 点击展开`}
     >

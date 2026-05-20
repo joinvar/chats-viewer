@@ -449,9 +449,15 @@ export function TranscriptView(props: {
 
   // Keep the tracked tree node visible inside the tree panel — only scrolls
   // when the node has actually left the visible area (block: "nearest").
+  // Fallback: if the tracked entry is hidden inside a collapsed group, the
+  // group placeholder publishes data-uuids="...", so we still find an
+  // element to scroll to (and to receive the tracking highlight) without
+  // having to expand the group.
   useEffect(() => {
     if (!trackedUuid || !showTree) return;
-    const treeEl = document.getElementById("tn-" + trackedUuid);
+    const treeEl =
+      document.getElementById("tn-" + trackedUuid) ??
+      document.querySelector(`[data-uuids~="${CSS.escape(trackedUuid)}"]`);
     treeEl?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [trackedUuid, showTree]);
 
