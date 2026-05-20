@@ -1,6 +1,6 @@
 import type { SessionSummary } from "../types";
 import type { Source } from "../api";
-import { formatRelative } from "../util";
+import { cleanSessionTitle, formatRelative } from "../util";
 import { CopyResume } from "./CopyResume";
 
 export function SessionList(props: {
@@ -24,11 +24,16 @@ export function SessionList(props: {
         <div className="hint">No sessions</div>
       )}
       {sessions.map((s) => {
+        // firstUserText is the stable opening of the conversation;
+        // agentName is Claude Code's auto-generated topic label that gets
+        // rewritten as the chat evolves, so it doesn't match what the user
+        // actually said first. Prefer firstUserText, keep agentName as
+        // backup for sessions that don't have a string-content opening.
         const title =
           s.customTitle ||
-          s.agentName ||
-          s.firstUserText ||
-          s.lastPrompt ||
+          cleanSessionTitle(s.firstUserText) ||
+          cleanSessionTitle(s.agentName) ||
+          cleanSessionTitle(s.lastPrompt) ||
           s.sessionId.slice(0, 8);
         return (
           <div

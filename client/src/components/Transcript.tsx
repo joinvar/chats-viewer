@@ -1,10 +1,21 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Transcript, Entry, ContentBlock } from "../types";
-import { EntryView } from "./Entry";
+import type {
+  Transcript,
+  Entry,
+  ContentBlock,
+  ToolUseBlock,
+  ToolResultBlock,
+} from "../types";
+import { EntryView, isPureToolEntry } from "./Entry";
 import { TreeView } from "./TreeView";
 import { CopyResume } from "./CopyResume";
 import { Splitter } from "./Splitter";
-import { formatTime } from "../util";
+import {
+  cleanSessionTitle,
+  formatTime,
+  hasMeaningfulTitle,
+  isToolResultEntry,
+} from "../util";
 import type { Source } from "../api";
 
 const TREE_W_KEY = "chats-viewer:tree-width";
@@ -209,6 +220,11 @@ export function TranscriptView(props: {
     return path.map((u) => byUuid[u]).filter(Boolean);
   }, [entries, byUuid, selectedLeaf, showAll, isLinearSource]);
 
+  // Collapse runs of pure-tool entries into group placeholders. Memoized
+  // because pathEntries can be thousands of entries in long sessions and
+  // this runs on every parent render (scroll, hover, search-query change).
+  const renderItems = useMemo(() => groupPathEntries(pathEntries), [pathEntries]);
+
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
   // The actual scrolling element is `.entries` (the flex column inside the
   // body — the body itself is overflow:hidden so the tree panel and entries
@@ -323,17 +339,12 @@ export function TranscriptView(props: {
     // Sync the tree highlight to the search-hit node so it gets the orange
     // selection bar in addition to the on-path styling.
     setClickedNode(scrollToUuid);
-    const el = document.getElementById("e-" + scrollToUuid);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.add("flash");
-      setTimeout(() => el.classList.remove("flash"), 3600);
-    }
-    const treeEl = document.getElementById("tn-" + scrollToUuid);
-    if (treeEl) {
-      treeEl.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-    onConsumedScroll();
+    // If the target is inside a collapsed group chip (chat side) or
+    // collapsed tree group, the DOM element doesn't exist yet — the chip
+    // auto-expands because clickedNode now matches one of its entries, but
+    // that expansion runs in a following render. Retry a few frames so we
+    // catch the element once the group's children have mounted.
+    scrollHitWhenReady(scrollToUuid, onConsumedScroll);
   }, [scrollToUuid, pathEntries, byUuid, showAll, isLinearSource, selectedLeaf]);
 
   // Restore scroll position once per session, after pathEntries has settled
@@ -476,7 +487,9 @@ export function TranscriptView(props: {
         <div className="transcript-head">
           <div className="transcript-title">
             {transcript.meta.customTitle ||
-              transcript.meta.agentName ||
+              cleanSessionTitle(firstRealUserText(entries)) ||
+              cleanSessionTitle(transcript.meta.agentName) ||
+              cleanSessionTitle(transcript.meta.lastPrompt) ||
               transcript.meta.sessionId.slice(0, 8)}
           </div>
           <div className="transcript-sub">
@@ -546,13 +559,185 @@ export function TranscriptView(props: {
           </>
         )}
         <div className="entries" ref={entriesScrollRef}>
-          {pathEntries.map((e) => (
-            <EntryView key={e.uuid} transcript={transcript} entry={e} />
-          ))}
+          {renderItems.map((item) =>
+            item.kind === "group" ? (
+              <ToolGroupChip
+                key={item.entries[0].uuid}
+                transcript={transcript}
+                entries={item.entries}
+                scrollToUuid={scrollToUuid}
+              />
+            ) : (
+              <EntryView
+                key={item.entry.uuid}
+                transcript={transcript}
+                entry={item.entry}
+              />
+            )
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+// Collapse every run of consecutive pure-tool entries into a single
+// near-invisible placeholder so the transcript reads as a clean
+// natural-language dialog like the Claude.ai chat view. Click the
+// placeholder to expand the run into individual chips when you actually
+// need to see what happened.
+type RenderItem =
+  | { kind: "single"; entry: Entry }
+  | { kind: "group"; entries: Entry[] };
+
+function groupPathEntries(entries: Entry[]): RenderItem[] {
+  const out: RenderItem[] = [];
+  let run: Entry[] = [];
+  const flush = () => {
+    if (run.length === 0) return;
+    out.push({ kind: "group", entries: run });
+    run = [];
+  };
+  for (const e of entries) {
+    if (isPureToolEntry(e)) {
+      run.push(e);
+    } else {
+      flush();
+      out.push({ kind: "single", entry: e });
+    }
+  }
+  flush();
+  return out;
+}
+
+// Group chip — module-level so React preserves its useState across parent
+// re-renders (would lose user-expanded state if defined inside the parent
+// component). Auto-expands when scrollToUuid points into the group so
+// search hits land on a visible entry; otherwise the user toggles it.
+function ToolGroupChip({
+  transcript,
+  entries,
+  scrollToUuid,
+}: {
+  transcript: Transcript;
+  entries: Entry[];
+  scrollToUuid: string | null;
+}) {
+  const containsScroll =
+    scrollToUuid != null && entries.some((e) => e.uuid === scrollToUuid);
+  const [userExpanded, setUserExpanded] = useState(false);
+  const expanded = userExpanded || containsScroll;
+  if (expanded) {
+    return (
+      <div className="tool-group expanded">
+        <button
+          className="tool-group-collapse"
+          onClick={() => setUserExpanded(false)}
+          title="收起组"
+        >
+          ▾ 收起 {entries.length} 步
+        </button>
+        {entries.map((e) => (
+          <EntryView key={e.uuid} transcript={transcript} entry={e} />
+        ))}
+      </div>
+    );
+  }
+  const first = entries[0];
+  const typeSummary = summarizeGroupTypes(entries);
+  return (
+    <button
+      id={"e-" + first.uuid}
+      className="entry entry-chip entry-chip-group"
+      onClick={() => setUserExpanded(true)}
+      title={`${entries.length} 步：${typeSummary} — 点击展开`}
+    >
+      <span className="chip-summary">··· {entries.length} 步</span>
+    </button>
+  );
+}
+
+// Retry scrollIntoView for a few animation frames so that if the target
+// entry was inside a just-auto-expanded group chip (chat or tree side),
+// we still find it once React commits the expansion. Without this,
+// search hits into collapsed groups silently scroll nowhere.
+function scrollHitWhenReady(uuid: string, onDone: () => void) {
+  let attempts = 6;
+  const tryOnce = () => {
+    const el = document.getElementById("e-" + uuid);
+    const treeEl = document.getElementById("tn-" + uuid);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("flash");
+      setTimeout(() => el.classList.remove("flash"), 3600);
+    }
+    if (treeEl) {
+      treeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    if (el || treeEl || attempts <= 0) {
+      onDone();
+      return;
+    }
+    attempts--;
+    requestAnimationFrame(tryOnce);
+  };
+  tryOnce();
+}
+
+function summarizeGroupTypes(entries: Entry[]): string {
+  const counts = new Map<string, number>();
+  for (const e of entries) {
+    const t = entryTypeLabel(e);
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([t, n]) => (n > 1 ? `${t}×${n}` : t))
+    .join(", ");
+}
+
+function entryTypeLabel(e: Entry): string {
+  if (e.kind === "attachment") return e.attachment?.type ?? "attachment";
+  if (e.kind === "user") {
+    const blocks = e.content as ContentBlock[];
+    const tr = blocks.find((b) => b.type === "tool_result") as
+      | ToolResultBlock
+      | undefined;
+    return tr?.is_error ? "error" : "result";
+  }
+  if (e.kind === "assistant") {
+    const tu = e.content.find((b) => b.type === "tool_use") as
+      | ToolUseBlock
+      | undefined;
+    if (tu) return tu.name;
+    if (e.content.some((b) => b.type === "thinking")) return "thinking";
+    return "(empty)";
+  }
+  return "?";
+}
+
+// First user-authored text in the session — skips sidechain entries, the
+// user-role wrappers that actually carry tool_result blocks, and openings
+// that are just slash commands or bare image placeholders (so a chat that
+// starts with /clear or "[Image #1]" shows the first substantive user line
+// as the title instead of the noise).
+function firstRealUserText(entries: Entry[]): string {
+  for (const e of entries) {
+    if (e.kind !== "user" || e.isSidechain) continue;
+    if (isToolResultEntry(e)) continue;
+    let text = "";
+    if (typeof e.content === "string") {
+      text = e.content;
+    } else if (Array.isArray(e.content)) {
+      for (const b of e.content as ContentBlock[]) {
+        if (b.type === "text" && b.text && b.text.trim()) {
+          text = b.text;
+          break;
+        }
+      }
+    }
+    if (text && hasMeaningfulTitle(text)) return text;
+  }
+  return "";
 }
 
 function findLeaves(

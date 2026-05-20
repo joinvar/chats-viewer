@@ -1,6 +1,7 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { Transcript, Entry, ContentBlock } from "../types";
 import { isToolResultEntry } from "../util";
+import { isPureToolEntry } from "./Entry";
 
 export function TreeView(props: {
   transcript: Transcript;
@@ -23,6 +24,7 @@ export function TreeView(props: {
     }
     return set;
   }, [selectedUuid, byUuid]);
+
 
   function Row({ uuid, isBranchPoint }: { uuid: string; isBranchPoint: boolean }) {
     const e = byUuid[uuid];
@@ -58,14 +60,43 @@ export function TreeView(props: {
 
   // Render a node plus its subtree, collapsing linear chains into the same column.
   // Only emits a .tn-children container at real branch points (> 1 child).
+  // Runs of consecutive pure-tool nodes (no branching) are collapsed into a
+  // single ToolGroupNode to match the chat view's noise reduction.
   function Chain({ startUuid }: { startUuid: string }): JSX.Element {
     const rows: JSX.Element[] = [];
     let cur: string | null = startUuid;
+    let toolBuf: string[] = [];
+    const flushTools = () => {
+      if (toolBuf.length === 0) return;
+      const uuids = toolBuf;
+      rows.push(
+        <ToolGroupNode
+          key={uuids[0] + ":tg"}
+          uuids={uuids}
+          selectedUuid={selectedUuid}
+          clickedUuid={clickedUuid ?? null}
+          trackedUuid={trackedUuid ?? null}
+          renderRow={(u) => <Row key={u} uuid={u} isBranchPoint={false} />}
+        />
+      );
+      toolBuf = [];
+    };
     while (cur) {
       const e = byUuid[cur];
       if (!e) break;
       const kids: string[] = childrenOf[cur] ?? [];
       const branching = kids.length > 1;
+      // Buffer pure-tool nodes that aren't branch points; they'll render as
+      // a single collapsed group when we hit a non-tool or a branch.
+      if (isPureToolEntry(e) && !branching) {
+        toolBuf.push(cur);
+        if (kids.length === 1) {
+          cur = kids[0];
+          continue;
+        }
+        break;
+      }
+      flushTools();
       rows.push(<Row key={cur} uuid={cur} isBranchPoint={branching} />);
       if (kids.length === 1) {
         cur = kids[0];
@@ -82,6 +113,7 @@ export function TreeView(props: {
       }
       break;
     }
+    flushTools();
     return <Fragment>{rows}</Fragment>;
   }
 
@@ -103,6 +135,63 @@ export function TreeView(props: {
       </div>
       <div className="tree-body">{body}</div>
     </div>
+  );
+}
+
+// A run of consecutive pure-tool nodes inside a linear chain — collapsed
+// to "··· N 步" by default, matching the chat view's noise reduction.
+// Auto-expands once when the current selection / tracked node is inside
+// it so the user doesn't lose sight of where they are (ratchet — won't
+// re-collapse if the active node later moves out). Branch points are
+// never grouped — they carry navigation. Module-level so React preserves
+// its useState across TreeView re-renders.
+function ToolGroupNode({
+  uuids,
+  selectedUuid,
+  clickedUuid,
+  trackedUuid,
+  renderRow,
+}: {
+  uuids: string[];
+  selectedUuid: string | null;
+  clickedUuid: string | null;
+  trackedUuid: string | null;
+  renderRow: (uuid: string) => JSX.Element;
+}) {
+  const containsActive = uuids.some(
+    (u) => u === selectedUuid || u === clickedUuid || u === trackedUuid
+  );
+  const [userExpanded, setUserExpanded] = useState(false);
+  const [autoExpanded, setAutoExpanded] = useState(containsActive);
+  useEffect(() => {
+    if (containsActive) setAutoExpanded(true);
+  }, [containsActive]);
+  const expanded = userExpanded || autoExpanded;
+  if (expanded) {
+    return (
+      <>
+        <button
+          className="tree-group-collapse"
+          onClick={() => {
+            setUserExpanded(false);
+            setAutoExpanded(false);
+          }}
+          title="收起工具步骤"
+        >
+          ▾ {uuids.length}
+        </button>
+        {uuids.map((u) => renderRow(u))}
+      </>
+    );
+  }
+  return (
+    <button
+      className="tree-node tree-group"
+      onClick={() => setUserExpanded(true)}
+      title={`${uuids.length} 步工具/系统 — 点击展开`}
+    >
+      <span className="preview">··· {uuids.length} 步</span>
+    </button>
   );
 }
 

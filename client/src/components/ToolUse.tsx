@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { ToolUseBlock } from "../types";
+import { summarizeToolInput } from "../util";
 
 export function ToolUse({ block }: { block: ToolUseBlock }) {
-  const [open, setOpen] = useState(true);
-  const summary = oneLineSummary(block);
+  const [open, setOpen] = useState(false);
+  const summary = summarizeToolInput(block.input);
   return (
     <div className="tool-use">
       <button className="tool-head" onClick={() => setOpen(!open)}>
@@ -18,17 +19,4 @@ export function ToolUse({ block }: { block: ToolUseBlock }) {
       )}
     </div>
   );
-}
-
-function oneLineSummary(b: ToolUseBlock): string {
-  const input = b.input as any;
-  if (!input || typeof input !== "object") return "";
-  if (typeof input.command === "string") return input.command.slice(0, 120);
-  if (typeof input.file_path === "string") return input.file_path;
-  if (typeof input.pattern === "string") return input.pattern;
-  if (typeof input.path === "string") return input.path;
-  if (typeof input.description === "string") return input.description;
-  if (typeof input.prompt === "string") return input.prompt.slice(0, 120);
-  if (typeof input.url === "string") return input.url;
-  return "";
 }

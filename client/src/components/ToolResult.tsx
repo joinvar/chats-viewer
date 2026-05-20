@@ -1,8 +1,6 @@
 import { useState } from "react";
 import type { ToolResultBlock } from "../types";
 
-const COLLAPSE_AT = 20; // lines
-
 export function ToolResult({
   block,
   toolUseResult,
@@ -15,31 +13,28 @@ export function ToolResult({
     toolUseResult && typeof toolUseResult.stderr === "string"
       ? toolUseResult.stderr
       : "";
-  const lines = text.split("\n");
-  const needsCollapse = lines.length > COLLAPSE_AT;
-  const [expanded, setExpanded] = useState(!needsCollapse);
-  const shown = expanded ? text : lines.slice(0, COLLAPSE_AT).join("\n");
+  const lines = text ? text.split("\n") : [];
+  // Errors are usually short and always interesting — open them by default
+  // so the user doesn't have to click to see what broke.
+  const [expanded, setExpanded] = useState(!!block.is_error);
+  const summary = !expanded ? collapsedSummary(text, lines.length) : "";
 
   return (
     <div className={"tool-result" + (block.is_error ? " error" : "")}>
-      <div className="tool-head">
+      <button className="tool-head" onClick={() => setExpanded(!expanded)}>
+        <span className="caret">{expanded ? "▾" : "▸"}</span>
         <span className="tool-name">⇐ result</span>
         {block.is_error && <span className="badge badge-error">error</span>}
-      </div>
-      {text ? (
-        <pre className="tool-output">{shown}
-          {needsCollapse && !expanded && <span className="muted">
-{"\n"}… {lines.length - COLLAPSE_AT} more lines</span>}
-        </pre>
-      ) : (
-        <div className="muted">(empty)</div>
+        {summary && <span className="tool-summary">{summary}</span>}
+      </button>
+      {expanded && (
+        text ? (
+          <pre className="tool-output">{text}</pre>
+        ) : (
+          <div className="tool-output muted">(empty)</div>
+        )
       )}
-      {needsCollapse && (
-        <button className="link" onClick={() => setExpanded(!expanded)}>
-          {expanded ? "Collapse" : `Expand (${lines.length} lines)`}
-        </button>
-      )}
-      {stderr && (
+      {expanded && stderr && (
         <details className="tool-stderr">
           <summary>stderr</summary>
           <pre>{stderr}</pre>
@@ -47,6 +42,14 @@ export function ToolResult({
       )}
     </div>
   );
+}
+
+function collapsedSummary(text: string, lineCount: number): string {
+  if (!text) return "(empty)";
+  const first = text.split("\n").find((l) => l.trim()) ?? "";
+  const one = first.replace(/\s+/g, " ").trim();
+  const clipped = one.length > 90 ? one.slice(0, 90) + "…" : one;
+  return lineCount > 1 ? `${clipped} · ${lineCount} 行` : clipped;
 }
 
 function extractText(b: ToolResultBlock): string {

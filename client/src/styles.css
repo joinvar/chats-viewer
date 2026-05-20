@@ -715,6 +715,35 @@ body.col-resizing * {
   opacity: 0.6;
 }
 .tn-system_api_error { background: var(--system); }
+/* Collapsed run of pure-tool nodes inside a linear chain. Near-invisible
+   by default; hover lights up to make it discoverable. Click expands to
+   the original per-node Rows. Mirrors the chat view's group chip. */
+.tree-node.tree-group {
+  padding: 1px 8px;
+  font-size: 10.5px;
+  color: var(--fg-mute);
+  opacity: 0.55;
+  font-family: var(--mono);
+}
+.tree-node.tree-group:hover {
+  opacity: 1;
+  background: var(--bg-2);
+}
+.tree-group-collapse {
+  align-self: flex-start;
+  padding: 0 8px;
+  margin: 0 0 1px 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-mute);
+  border-radius: 3px;
+  background: transparent;
+}
+.tree-group-collapse:hover {
+  background: var(--bg-2);
+  color: var(--fg-dim);
+}
+
 .tree-node .branch-badge {
   font-size: 10px;
   color: var(--accent-2);
@@ -833,6 +862,96 @@ body.col-resizing * {
 }
 .entry-body {
   max-width: 100%;
+}
+
+/* Entry chip — a pure tool_use / tool_result entry collapsed to one line so
+   it doesn't visually compete with the natural-language conversation. Click
+   the chip to expand into the regular EntryView layout. */
+.entry.entry-chip {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 3px 10px;
+  margin-bottom: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+  cursor: pointer;
+  overflow: hidden;
+}
+.entry.entry-chip:hover {
+  background: var(--bg-1);
+  border-color: var(--border-soft);
+}
+.entry-chip .chip-summary {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.entry-chip-use .chip-summary {
+  color: var(--accent);
+}
+.entry-chip-result .chip-summary {
+  color: var(--fg-mute);
+}
+.entry-chip-attachment .chip-summary {
+  color: var(--attachment);
+}
+/* Group chip — a collapsed run of pure-tool / attachment / thinking
+   entries. Deliberately near-invisible: tiny, faded, no border so the
+   reader's eye skips over it and focuses on the natural-language
+   messages. Hover restores opacity to make it discoverable. */
+.entry.entry-chip.entry-chip-group {
+  padding: 1px 10px;
+  margin: 2px 0;
+  background: transparent;
+  border-color: transparent;
+  font-size: 10.5px;
+  color: var(--fg-mute);
+  opacity: 0.5;
+  cursor: pointer;
+}
+.entry.entry-chip.entry-chip-group:hover {
+  opacity: 1;
+  background: var(--bg-1);
+  border-color: var(--border-soft);
+}
+.entry-chip-group .chip-summary {
+  color: inherit;
+  font-family: var(--mono);
+}
+.tool-group.expanded {
+  display: flex;
+  flex-direction: column;
+  border-left: 2px solid var(--border-soft);
+  padding-left: 8px;
+  margin-bottom: 6px;
+}
+.tool-group-collapse {
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--fg-mute);
+  padding: 2px 6px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+}
+.tool-group-collapse:hover {
+  background: var(--bg-1);
+  color: var(--fg-dim);
+}
+.entry-chip .ts {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--fg-mute);
+  font-family: var(--mono);
 }
 
 /* Markdown */

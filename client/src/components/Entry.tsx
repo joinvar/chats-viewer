@@ -16,7 +16,12 @@ import { ToolResult } from "./ToolResult";
 import { Thinking } from "./Thinking";
 import { SidechainBlock } from "./Sidechain";
 import { useState } from "react";
-import { formatTime, stripSystemReminders, isToolResultEntry } from "../util";
+import {
+  formatTime,
+  stripSystemReminders,
+  isToolResultEntry,
+  summarizeToolInput,
+} from "../util";
 
 export function EntryView({
   transcript,
@@ -26,6 +31,32 @@ export function EntryView({
   entry: Entry;
 }) {
   const toolResult = isToolResultEntry(entry);
+  const pureTool = isPureToolEntry(entry);
+  const [chipExpanded, setChipExpanded] = useState(false);
+
+  if (pureTool && !chipExpanded) {
+    const summary = pureToolEntrySummary(entry);
+    const variantClass =
+      entry.kind === "attachment"
+        ? "entry-chip-attachment"
+        : toolResult
+        ? "entry-chip-result"
+        : "entry-chip-use";
+    return (
+      <button
+        id={"e-" + entry.uuid}
+        className={"entry entry-chip " + variantClass}
+        onClick={() => setChipExpanded(true)}
+        title={entry.timestamp}
+      >
+        <span className="chip-summary">{summary}</span>
+        {entry.timestamp && (
+          <span className="ts">{formatTime(entry.timestamp)}</span>
+        )}
+      </button>
+    );
+  }
+
   return (
     <div
       className={
@@ -46,6 +77,64 @@ export function EntryView({
       </div>
     </div>
   );
+}
+
+// True when an entry carries only tool plumbing or system attachments
+// (tool_use / tool_result / thinking / Claude Code's injected attachments
+// like async_hook_response, task_reminder, hook_success). These are
+// rendered as collapsed single-line chips so the user's natural-language
+// dialog isn't drowned by tool/system noise. Also used by Transcript's
+// consecutive-tool grouping to find runs of plumbing entries to collapse.
+export function isPureToolEntry(e: Entry): boolean {
+  if (e.kind === "attachment") return true;
+  if (isToolResultEntry(e)) return true;
+  if (e.kind !== "assistant") return false;
+  const blocks = e.content;
+  if (blocks.length === 0) return true; // empty assistant placeholder
+  const hasText = blocks.some(
+    (b) => b.type === "text" && b.text && b.text.trim()
+  );
+  if (hasText) return false;
+  return blocks.some((b) => b.type === "tool_use" || b.type === "thinking");
+}
+
+function pureToolEntrySummary(e: Entry): string {
+  if (e.kind === "attachment") {
+    const t = e.attachment?.type ?? "attachment";
+    return `📎 ${t}`;
+  }
+  if (e.kind === "user") {
+    const blocks = e.content as ContentBlock[];
+    const tr = blocks.find((b) => b.type === "tool_result") as
+      | ToolResultBlock
+      | undefined;
+    const head = tr?.is_error ? "⇐ error" : "⇐ result";
+    if (!tr) return head;
+    const text =
+      typeof tr.content === "string"
+        ? tr.content
+        : (tr.content as Array<{ text?: string }>)
+            .map((c) => c.text ?? "")
+            .filter(Boolean)
+            .join("\n");
+    const first = text.split("\n").find((l) => l.trim()) ?? "";
+    const one = first.replace(/\s+/g, " ").trim();
+    if (!one) return head;
+    const clipped = one.length > 90 ? one.slice(0, 90) + "…" : one;
+    return `${head} · ${clipped}`;
+  }
+  // pureToolEntrySummary is only called for pure-tool entries, so by the
+  // time we get here `e` is an assistant entry with a tool_use block.
+  if (e.kind !== "assistant") return "⇒ tool";
+  const tu = e.content.find((b) => b.type === "tool_use") as
+    | ToolUseBlock
+    | undefined;
+  if (tu) {
+    const summary = summarizeToolInput(tu.input);
+    return summary ? `⇒ ${tu.name} · ${summary}` : `⇒ ${tu.name}`;
+  }
+  if (e.content.some((b) => b.type === "thinking")) return "…thinking";
+  return "(empty)";
 }
 
 function EntryHeader({

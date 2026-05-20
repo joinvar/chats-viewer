@@ -128,9 +128,9 @@ export async function summarizeSession(
         if (!summary.endedAt || o.timestamp > summary.endedAt) summary.endedAt = o.timestamp;
       }
       if (o.type === "user" && !summary.firstUserText && !o.isMeta) {
-        const c = o.message?.content;
-        if (typeof c === "string") {
-          summary.firstUserText = stripSystemReminders(c).slice(0, 300);
+        const text = extractUserText(o.message?.content);
+        if (text && hasMeaningfulOpening(text)) {
+          summary.firstUserText = stripSystemReminders(text).slice(0, 300);
         }
       }
     }
@@ -140,6 +140,52 @@ export async function summarizeSession(
 
 export function stripSystemReminders(s: string): string {
   return s.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+}
+
+// Pull a usable text snippet out of a user-message content field. The
+// Anthropic API encodes message.content as either a plain string or an
+// array of typed blocks (text / image / tool_result / …). For mixed
+// image+text messages we want the first non-empty text block so titles
+// don't fall back to the volatile agent-name.
+function extractUserText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  for (const b of content as Array<{ type?: string; text?: string }>) {
+    if (b && b.type === "text" && typeof b.text === "string" && b.text.trim()) {
+      return b.text;
+    }
+  }
+  return "";
+}
+
+// True when a candidate user opening has substantive content — i.e. not
+// just a /clear / /compact slash command or a bare "[Image #1]" placeholder.
+// Used to skip past noise openings when picking firstUserText so titles
+// reflect the user's first real prompt. Mirrors the client-side
+// hasMeaningfulTitle / cleanSessionTitle logic.
+function hasMeaningfulOpening(text: string): boolean {
+  let s = text;
+  s = s.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "");
+  s = s.replace(/<command-message>[\s\S]*?<\/command-message>/g, "");
+  s = s.replace(
+    /<local-command-(?:stdout|stderr)>[\s\S]*?<\/local-command-(?:stdout|stderr)>/g,
+    ""
+  );
+  s = s.replace(
+    /<command-name>([\s\S]*?)<\/command-name>\s*(?:<command-args>([\s\S]*?)<\/command-args>)?/g,
+    (_m, name, args) => {
+      const n = (name ?? "").trim();
+      const a = (args ?? "").trim();
+      return a ? `${n} ${a} ` : `${n} `;
+    }
+  );
+  s = s.replace(/<\/?[a-zA-Z][\w-]*(?:\s[^>]*)?>/g, "");
+  s = s.replace(/^(?:\s*\[Image[^\]]*\])+/g, "");
+  s = s.replace(/\s+/g, " ").trim();
+  if (!s) return false;
+  // A bare slash command, optionally with a few args, is not meaningful.
+  if (/^\/[a-zA-Z][\w-]*(?:\s+\S+){0,2}$/.test(s)) return false;
+  return true;
 }
 
 export async function listSessions(projectId: string): Promise<SessionSummary[]> {
