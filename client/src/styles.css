@@ -1366,7 +1366,7 @@ body.col-resizing * {
   opacity: 1;
 }
 .search-time-menu {
-  min-width: 208px;
+  min-width: 226px;
 }
 .search-time-preset {
   display: flex;
@@ -1409,11 +1409,11 @@ body.col-resizing * {
 .search-time-add {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: 6px 4px 2px;
 }
 .search-time-add input[type="number"] {
-  width: 66px;
+  width: 44px;
   padding: 4px 6px;
   font-size: 12px;
   font-family: var(--mono);
@@ -1475,7 +1475,8 @@ body.col-resizing * {
   flex: 0 0 auto;
   width: 18px;
 }
-.search-time-row input[type="date"] {
+.search-time-row input[type="date"],
+.search-time-row input[type="datetime-local"] {
   flex: 1 1 auto;
   min-width: 0;
   padding: 4px 6px;
@@ -1487,7 +1488,8 @@ body.col-resizing * {
   border-radius: 5px;
   color-scheme: light;
 }
-.search-time-row input[type="date"]:focus {
+.search-time-row input[type="date"]:focus,
+.search-time-row input[type="datetime-local"]:focus {
   outline: none;
   border-color: var(--accent);
 }

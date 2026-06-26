@@ -6,137 +6,96 @@ import { formatRelative } from "../util";
 import { ToolIcon } from "./ToolIcon";
 
 // The search time filter is shared by every view (per-tool and aggregated
-// "all"). It offers a user-editable list of presets plus a live "custom"
-// absolute range. A preset is either a rolling window ("近 N 天") or a fixed
-// from/to range — both can be added and deleted. `timeRange` is
-// "all" | "custom" | <preset key>.
+// "all"). It's a user-editable list of rolling windows measured in hours
+// (entered as 天 + 小时, precise to the hour). `timeRange` is "all" | "h<hours>".
 const TIME_KEY = "chats-viewer:search-time";
-const PRESETS_KEY = "chats-viewer:time-presets";
-const DEFAULT_PRESET_DAYS = [1, 2, 3, 7, 14, 30, 90];
-const MAX_PRESET_DAYS = 3650;
+const PRESETS_KEY = "chats-viewer:time-presets-h"; // hours-based (v2)
+const OLD_PRESETS_KEY = "chats-viewer:time-presets"; // legacy days / Preset[]
+const DEFAULT_PRESET_HOURS = [6, 12, 24, 48, 72, 168, 720]; // 6h,12h,1/2/3/7/30天
+const MAX_PRESET_HOURS = 366 * 24;
 
-type Preset =
-  | { kind: "days"; days: number }
-  | { kind: "range"; from: string; to: string };
-
-function presetKey(p: Preset): string {
-  return p.kind === "days" ? "d" + p.days : "r" + p.from + "_" + p.to;
+function presetKey(hours: number): string {
+  return "h" + hours;
 }
 
-function presetLabel(p: Preset): string {
-  if (p.kind === "days") return `近 ${p.days} 天`;
-  const f = p.from ? fmtMD(p.from) : "";
-  const t = p.to ? fmtMD(p.to) : "";
-  if (f && t) return `${f}–${t}`;
-  if (f) return `≥${f}`;
-  if (t) return `≤${t}`;
-  return "范围";
+// hours → "近 X 天 Y 小时" (omit a zero component).
+function formatHours(hours: number): string {
+  const d = Math.floor(hours / 24);
+  const h = hours % 24;
+  if (d && h) return `近 ${d} 天 ${h} 小时`;
+  if (d) return `近 ${d} 天`;
+  return `近 ${h} 小时`;
 }
 
-// days presets first (by length), then ranges (by start) — a stable order so
-// the list doesn't jump around as the user edits it.
-function sortPresets(arr: Preset[]): Preset[] {
-  return [...arr].sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "days" ? -1 : 1;
-    if (a.kind === "days" && b.kind === "days") return a.days - b.days;
-    if (a.kind === "range" && b.kind === "range")
-      return (a.from + a.to).localeCompare(b.from + b.to);
-    return 0;
-  });
+function sanitizeHours(arr: number[]): number[] {
+  const valid = arr.filter((n) => Number.isFinite(n) && n > 0 && n <= MAX_PRESET_HOURS);
+  return Array.from(new Set(valid)).sort((a, b) => a - b);
 }
 
-function dedupePresets(arr: Preset[]): Preset[] {
-  const seen = new Set<string>();
-  const out: Preset[] = [];
-  for (const p of arr) {
-    const k = presetKey(p);
-    if (!seen.has(k)) {
-      seen.add(k);
-      out.push(p);
-    }
-  }
-  return out;
+function savePresets(hours: number[]) {
+  try {
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(hours));
+  } catch {}
 }
 
-function loadPresets(): Preset[] {
+function loadPresets(): number[] {
   try {
     const s = localStorage.getItem(PRESETS_KEY);
     if (s) {
       const a = JSON.parse(s);
+      if (Array.isArray(a)) return sanitizeHours(a.map(Number));
+    }
+    // One-time migration from the older day/range presets: keep day windows
+    // (× 24 → hours), drop the absolute ranges.
+    const old = localStorage.getItem(OLD_PRESETS_KEY);
+    if (old) {
+      const a = JSON.parse(old);
       if (Array.isArray(a)) {
-        const out: Preset[] = [];
+        const hours: number[] = [];
         for (const it of a) {
-          // Legacy format stored a bare day count.
-          if (typeof it === "number" && it > 0 && it <= MAX_PRESET_DAYS) {
-            out.push({ kind: "days", days: it });
-          } else if (
-            it &&
-            it.kind === "days" &&
-            typeof it.days === "number" &&
-            it.days > 0 &&
-            it.days <= MAX_PRESET_DAYS
-          ) {
-            out.push({ kind: "days", days: it.days });
-          } else if (it && it.kind === "range") {
-            const from = typeof it.from === "string" ? it.from : "";
-            const to = typeof it.to === "string" ? it.to : "";
-            if (from || to) out.push({ kind: "range", from, to });
-          }
+          if (typeof it === "number") hours.push(it * 24);
+          else if (it && it.kind === "days" && typeof it.days === "number")
+            hours.push(it.days * 24);
         }
-        return sortPresets(dedupePresets(out));
+        const out = sanitizeHours(hours);
+        if (out.length) {
+          savePresets(out);
+          return out;
+        }
       }
     }
   } catch {}
-  return DEFAULT_PRESET_DAYS.map((d) => ({ kind: "days", days: d }));
+  return [...DEFAULT_PRESET_HOURS];
 }
 
-function savePresets(presets: Preset[]) {
-  try {
-    localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
-  } catch {}
-}
-
-// Local calendar day → UTC ISO bounds (full day, inclusive).
-function dateBounds(from: string, to: string): { since?: string; until?: string } {
-  const r: { since?: string; until?: string } = {};
-  if (from) r.since = new Date(from + "T00:00:00").toISOString();
-  if (to) r.until = new Date(to + "T23:59:59.999").toISOString();
-  return r;
-}
-
-// Accept the current preset-key schemes plus the earlier "7d" form.
+// Accept the current "h<hours>" scheme; map the older day keys ("d7", "7d") to
+// hours and drop the removed absolute-range / custom values.
 function normalizeRange(r: string): string {
-  if (r === "all" || r === "custom") return r;
-  if (/^d\d+$/.test(r)) return r;
-  if (/^r.*_.*/.test(r)) return r;
-  const m = r.match(/^(\d+)d$/);
-  return m ? "d" + m[1] : "all";
+  if (r === "all") return r;
+  if (/^h\d+$/.test(r)) return r;
+  let m = r.match(/^d(\d+)$/);
+  if (m) return "h" + Number(m[1]) * 24;
+  m = r.match(/^(\d+)d$/);
+  if (m) return "h" + Number(m[1]) * 24;
+  return "all";
 }
 
-type TimeState = { range: string; from: string; to: string };
-
-function loadTimeState(): TimeState {
-  const def: TimeState = { range: "all", from: "", to: "" };
+function loadRange(): string {
   try {
     const s = localStorage.getItem(TIME_KEY);
-    if (!s) return def;
+    if (!s) return "all";
     if (s[0] === "{") {
       const o = JSON.parse(s);
-      return {
-        range: normalizeRange(typeof o.range === "string" ? o.range : "all"),
-        from: typeof o.from === "string" ? o.from : "",
-        to: typeof o.to === "string" ? o.to : "",
-      };
+      return normalizeRange(typeof o.range === "string" ? o.range : "all");
     }
-    return { ...def, range: normalizeRange(s) }; // legacy: bare preset key
+    return normalizeRange(s);
   } catch {}
-  return def;
+  return "all";
 }
 
-// yyyy-mm-dd → "M/D" for the compact trigger label.
-function fmtMD(d: string): string {
-  const m = d.match(/^\d{4}-(\d{2})-(\d{2})$/);
-  return m ? `${+m[1]}/${+m[2]}` : d;
+function rangeHours(range: string): number | null {
+  const m = range.match(/^h(\d+)$/);
+  return m ? Number(m[1]) : null;
 }
 
 export function SearchBar({
@@ -156,12 +115,10 @@ export function SearchBar({
   const [loading, setLoading] = useState(false);
   const [scopeProjectId, setScopeProjectId] = useState<string | null>(null);
   const [scopeOpen, setScopeOpen] = useState(false);
-  const initTime = useMemo(loadTimeState, []);
-  const [timeRange, setTimeRange] = useState<string>(initTime.range);
-  const [customFrom, setCustomFrom] = useState<string>(initTime.from);
-  const [customTo, setCustomTo] = useState<string>(initTime.to);
-  const [presets, setPresets] = useState<Preset[]>(loadPresets);
-  const [addDays, setAddDays] = useState<string>("");
+  const [timeRange, setTimeRange] = useState<string>(loadRange);
+  const [presets, setPresets] = useState<number[]>(loadPresets);
+  const [addD, setAddD] = useState<string>(""); // 天
+  const [addH, setAddH] = useState<string>(""); // 小时
   const [timeOpen, setTimeOpen] = useState(false);
   const timer = useRef<number | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -192,26 +149,13 @@ export function SearchBar({
       setLoading(true);
       try {
         let since: string | undefined;
-        let until: string | undefined;
-        if (timeRange === "custom") {
-          // The live custom editor: its from/to are local calendar days.
-          ({ since, until } = dateBounds(customFrom, customTo));
-        } else if (timeRange !== "all") {
-          const p = presets.find((x) => presetKey(x) === timeRange);
-          if (p) {
-            if (p.kind === "days") {
-              since = new Date(Date.now() - p.days * 86400000).toISOString();
-            } else {
-              ({ since, until } = dateBounds(p.from, p.to));
-            }
-          }
-        }
+        const hrs = rangeHours(timeRange);
+        if (hrs) since = new Date(Date.now() - hrs * 3600000).toISOString();
         const res = await api.search(
           q.trim(),
           source,
           scopeProjectId ?? undefined,
-          since,
-          until
+          since
         );
         setHits(res);
       } catch {
@@ -223,7 +167,7 @@ export function SearchBar({
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [q, source, scopeProjectId, timeRange, customFrom, customTo, presets]);
+  }, [q, source, scopeProjectId, timeRange]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -236,74 +180,42 @@ export function SearchBar({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  function persistTime(next: TimeState) {
+  function persistRange(range: string) {
     try {
-      localStorage.setItem(TIME_KEY, JSON.stringify(next));
+      localStorage.setItem(TIME_KEY, JSON.stringify({ range }));
     } catch {}
   }
   function selectRange(range: string, close = true) {
     setTimeRange(range);
     if (close) setTimeOpen(false);
-    persistTime({ range, from: customFrom, to: customTo });
+    persistRange(range);
   }
-  function changeCustom(from: string, to: string) {
-    // Any custom bound switches into "custom" mode; clearing both falls back
-    // to "不限时间".
-    const range = from || to ? "custom" : "all";
-    setCustomFrom(from);
-    setCustomTo(to);
-    setTimeRange(range);
-    persistTime({ range, from, to });
-  }
-  function addPreset(p: Preset) {
-    const key = presetKey(p);
-    if (!presets.some((x) => presetKey(x) === key)) {
-      const next = sortPresets([...presets, p]);
+  function addPreset() {
+    const d = Math.floor(Number(addD) || 0);
+    const h = Math.floor(Number(addH) || 0);
+    const hours = d * 24 + h;
+    if (!Number.isFinite(hours) || hours <= 0 || hours > MAX_PRESET_HOURS) return;
+    setAddD("");
+    setAddH("");
+    if (!presets.includes(hours)) {
+      const next = sanitizeHours([...presets, hours]);
       setPresets(next);
       savePresets(next);
     }
-    selectRange(key, false); // select the added preset, keep the menu open
+    selectRange(presetKey(hours), false); // select the added preset, keep menu open
   }
-  function addDaysPreset() {
-    const n = Math.floor(Number(addDays));
-    if (!Number.isFinite(n) || n <= 0 || n > MAX_PRESET_DAYS) return;
-    setAddDays("");
-    addPreset({ kind: "days", days: n });
-  }
-  function addRangePreset() {
-    if (!customFrom && !customTo) return;
-    addPreset({ kind: "range", from: customFrom, to: customTo });
-  }
-  function removePreset(p: Preset, e: React.MouseEvent) {
+  function removePreset(hours: number, e: React.MouseEvent) {
     e.stopPropagation();
-    const key = presetKey(p);
-    const next = presets.filter((x) => presetKey(x) !== key);
+    const next = presets.filter((x) => x !== hours);
     setPresets(next);
     savePresets(next);
-    if (timeRange === key) selectRange("all", false); // drop the now-gone filter
+    if (timeRange === presetKey(hours)) selectRange("all", false); // drop the filter
   }
 
-  // Is the live custom range already saved as a preset?
-  const customSaved = useMemo(
-    () =>
-      (!!customFrom || !!customTo) &&
-      presets.some(
-        (p) => p.kind === "range" && p.from === customFrom && p.to === customTo
-      ),
-    [presets, customFrom, customTo]
-  );
-
   const timeLabel = useMemo(() => {
-    if (timeRange === "all") return "不限";
-    const target =
-      timeRange === "custom"
-        ? ({ kind: "range", from: customFrom, to: customTo } as Preset)
-        : presets.find((p) => presetKey(p) === timeRange);
-    if (!target) return "不限";
-    return target.kind === "range" && !target.from && !target.to
-      ? "自定义"
-      : presetLabel(target);
-  }, [timeRange, customFrom, customTo, presets]);
+    const hrs = rangeHours(timeRange);
+    return hrs ? formatHours(hrs) : "不限";
+  }, [timeRange]);
 
   const scopeLabel = useMemo(() => {
     if (!scopeProjectId) return "全部";
@@ -379,8 +291,8 @@ export function SearchBar({
               >
                 不限时间
               </button>
-              {presets.map((p) => {
-                const key = presetKey(p);
+              {presets.map((hrs) => {
+                const key = presetKey(hrs);
                 return (
                   <div
                     key={key}
@@ -393,85 +305,56 @@ export function SearchBar({
                       className="search-scope-item search-time-preset-label"
                       onClick={() => selectRange(key)}
                     >
-                      {presetLabel(p)}
+                      {formatHours(hrs)}
                     </button>
                     <button
                       className="search-time-preset-del"
                       title="删除该预设"
-                      onClick={(e) => removePreset(p, e)}
+                      onClick={(e) => removePreset(hrs, e)}
                     >
                       ×
                     </button>
                   </div>
                 );
               })}
+              <div className="search-scope-divider" />
               <div className="search-time-add">
                 <input
                   type="number"
-                  min={1}
-                  max={MAX_PRESET_DAYS}
-                  value={addDays}
-                  onChange={(e) => setAddDays(e.target.value)}
+                  min={0}
+                  value={addD}
+                  onChange={(e) => setAddD(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
-                      addDaysPreset();
+                      addPreset();
                     }
                   }}
-                  placeholder="天数"
+                  placeholder="0"
                 />
                 <span>天</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={addH}
+                  onChange={(e) => setAddH(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addPreset();
+                    }
+                  }}
+                  placeholder="0"
+                />
+                <span>时</span>
                 <button
                   className="search-time-add-btn"
-                  onClick={addDaysPreset}
-                  disabled={!addDays}
+                  onClick={addPreset}
+                  disabled={!addD && !addH}
                 >
                   加为预设
                 </button>
-              </div>
-              <div className="search-scope-divider" />
-              <div
-                className={
-                  "search-time-custom" + (timeRange === "custom" ? " active" : "")
-                }
-              >
-                <div className="search-time-custom-label">自定义范围</div>
-                <label className="search-time-row">
-                  <span>从</span>
-                  <input
-                    type="date"
-                    value={customFrom}
-                    max={customTo || undefined}
-                    onChange={(e) => changeCustom(e.target.value, customTo)}
-                  />
-                </label>
-                <label className="search-time-row">
-                  <span>到</span>
-                  <input
-                    type="date"
-                    value={customTo}
-                    min={customFrom || undefined}
-                    onChange={(e) => changeCustom(customFrom, e.target.value)}
-                  />
-                </label>
-                {(customFrom || customTo) && (
-                  <div className="search-time-custom-actions">
-                    <button
-                      className="search-time-add-btn"
-                      onClick={addRangePreset}
-                      disabled={customSaved}
-                      title={customSaved ? "该范围已在预设中" : "把当前范围加入上方预设"}
-                    >
-                      {customSaved ? "已加为预设" : "加为预设"}
-                    </button>
-                    <button
-                      className="search-time-clear"
-                      onClick={() => changeCustom("", "")}
-                    >
-                      清除
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           )}
