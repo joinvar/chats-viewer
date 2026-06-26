@@ -213,7 +213,11 @@ export async function search(
   q: string,
   limit = 100,
   source: SearchSource = "claude",
-  projectId?: string
+  projectId?: string,
+  // ISO bounds, inclusive. Rows are filtered by their entry timestamp so the
+  // limit cap applies *after* the time window, not before.
+  since?: string,
+  until?: string
 ): Promise<SearchHit[]> {
   await ensureIndex(source);
   const ql = q.toLowerCase();
@@ -222,6 +226,8 @@ export async function search(
   const hits: SearchHit[] = [];
   for (const r of idx.rows) {
     if (projectId && r.projectId !== projectId) continue;
+    if (since && (r.timestamp || "") < since) continue;
+    if (until && (r.timestamp || "") > until) continue;
     const i = r.textLower.indexOf(ql);
     if (i < 0) continue;
     const start = Math.max(0, i - 80);
@@ -258,12 +264,14 @@ export async function search(
 export async function searchAll(
   q: string,
   limit = 100,
-  projectId?: string
+  projectId?: string,
+  since?: string,
+  until?: string
 ): Promise<SearchHit[]> {
   const [claude, cursor, codex] = await Promise.all([
-    search(q, limit, "claude", projectId),
-    search(q, limit, "cursor", projectId),
-    search(q, limit, "codex", projectId),
+    search(q, limit, "claude", projectId, since, until),
+    search(q, limit, "cursor", projectId, since, until),
+    search(q, limit, "codex", projectId, since, until),
   ]);
   const tag = (arr: SearchHit[], source: SearchSource): SearchHit[] =>
     arr.map((h) => ({ ...h, source }));

@@ -177,12 +177,14 @@ app.get("/api/search", async (req, res) => {
   try {
     const q = String(req.query.q ?? "");
     const projectId = req.query.projectId ? String(req.query.projectId) : undefined;
+    const since = req.query.since ? String(req.query.since) : undefined;
+    const until = req.query.until ? String(req.query.until) : undefined;
     if (req.query.source === "all") {
-      res.json(await searchAll(q, 100, projectId));
+      res.json(await searchAll(q, 100, projectId, since, until));
       return;
     }
     const src = pickSource(req);
-    res.json(await search(q, 100, src, projectId));
+    res.json(await search(q, 100, src, projectId, since, until));
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }

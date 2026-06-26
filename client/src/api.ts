@@ -82,9 +82,17 @@ export const api = {
   allProjects: () => j<ProjectSummary[]>("/api/all/projects"),
   allSessions: () => j<SessionSummary[]>("/api/all/sessions"),
   session: loadTranscript,
-  search: (q: string, source: View = "claude", projectId?: string) => {
+  search: (
+    q: string,
+    source: View = "claude",
+    projectId?: string,
+    since?: string,
+    until?: string
+  ) => {
     let url = `/api/search?q=${encodeURIComponent(q)}`;
     if (projectId) url += `&projectId=${encodeURIComponent(projectId)}`;
+    if (since) url += `&since=${encodeURIComponent(since)}`;
+    if (until) url += `&until=${encodeURIComponent(until)}`;
     return j<SearchHit[]>(withSource(url, source));
   },
   deleteProject: (projectId: string, source: Source = "claude") =>

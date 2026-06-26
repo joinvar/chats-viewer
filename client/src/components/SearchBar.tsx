@@ -5,6 +5,26 @@ import type { ProjectSummary, SearchHit } from "../types";
 import { formatRelative } from "../util";
 import { ToolIcon } from "./ToolIcon";
 
+// Rolling time windows for the search range filter. `days: 0` means no bound.
+// Shared by both the per-tool and aggregated ("all") search — the SearchBar is
+// the same component in every view.
+const TIME_PRESETS: { key: string; label: string; short: string; days: number }[] = [
+  { key: "all", label: "不限时间", short: "不限", days: 0 },
+  { key: "1d", label: "近 24 小时", short: "近 24h", days: 1 },
+  { key: "7d", label: "近 7 天", short: "近 7 天", days: 7 },
+  { key: "30d", label: "近 30 天", short: "近 30 天", days: 30 },
+  { key: "90d", label: "近 3 个月", short: "近 3 月", days: 90 },
+];
+const TIME_KEY = "chats-viewer:search-time";
+
+function loadTimeRange(): string {
+  try {
+    const s = localStorage.getItem(TIME_KEY);
+    if (s && TIME_PRESETS.some((p) => p.key === s)) return s;
+  } catch {}
+  return "all";
+}
+
 export function SearchBar({
   onOpenHit,
   source = "claude",
@@ -22,9 +42,12 @@ export function SearchBar({
   const [loading, setLoading] = useState(false);
   const [scopeProjectId, setScopeProjectId] = useState<string | null>(null);
   const [scopeOpen, setScopeOpen] = useState(false);
+  const [timeRange, setTimeRange] = useState<string>(loadTimeRange);
+  const [timeOpen, setTimeOpen] = useState(false);
   const timer = useRef<number | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const scopeRef = useRef<HTMLDivElement | null>(null);
+  const timeRef = useRef<HTMLDivElement | null>(null);
 
   // Clear results AND reset scope when the user swaps data sources — stale
   // claude hits in a cursor view (or vice versa) wouldn't map to any real
@@ -49,10 +72,16 @@ export function SearchBar({
     timer.current = window.setTimeout(async () => {
       setLoading(true);
       try {
+        const preset = TIME_PRESETS.find((p) => p.key === timeRange);
+        const since =
+          preset && preset.days > 0
+            ? new Date(Date.now() - preset.days * 86400000).toISOString()
+            : undefined;
         const res = await api.search(
           q.trim(),
           source,
-          scopeProjectId ?? undefined
+          scopeProjectId ?? undefined,
+          since
         );
         setHits(res);
       } catch {
@@ -64,17 +93,27 @@ export function SearchBar({
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [q, source, scopeProjectId]);
+  }, [q, source, scopeProjectId, timeRange]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
       const t = e.target as Node;
       if (boxRef.current && !boxRef.current.contains(t)) setOpen(false);
       if (scopeRef.current && !scopeRef.current.contains(t)) setScopeOpen(false);
+      if (timeRef.current && !timeRef.current.contains(t)) setTimeOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
+
+  function chooseTime(key: string) {
+    setTimeRange(key);
+    setTimeOpen(false);
+    try {
+      localStorage.setItem(TIME_KEY, key);
+    } catch {}
+  }
+  const timePreset = TIME_PRESETS.find((p) => p.key === timeRange) ?? TIME_PRESETS[0];
 
   const scopeLabel = useMemo(() => {
     if (!scopeProjectId) return "全部";
@@ -123,6 +162,34 @@ export function SearchBar({
                   title={p.cwd}
                 >
                   {shortCwd(p.cwd) || p.id.slice(0, 12)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="search-scope search-time" ref={timeRef}>
+          <button
+            className={
+              "search-scope-trigger" + (timeRange !== "all" ? " active" : "")
+            }
+            onClick={() => setTimeOpen((v) => !v)}
+            title="搜索时间范围"
+          >
+            <ClockIcon />
+            <span className="search-scope-label">{timePreset.short}</span>
+            <span className="search-scope-caret">▾</span>
+          </button>
+          {timeOpen && (
+            <div className="search-scope-menu">
+              {TIME_PRESETS.map((p) => (
+                <button
+                  key={p.key}
+                  className={
+                    "search-scope-item" + (timeRange === p.key ? " selected" : "")
+                  }
+                  onClick={() => chooseTime(p.key)}
+                >
+                  {p.label}
                 </button>
               ))}
             </div>
@@ -181,6 +248,35 @@ export function SearchBar({
         </div>
       )}
     </div>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg
+      className="search-time-icon"
+      viewBox="0 0 24 24"
+      width="12"
+      height="12"
+      aria-hidden
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M12 7v5l3 2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

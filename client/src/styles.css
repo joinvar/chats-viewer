@@ -1352,6 +1352,19 @@ body.col-resizing * {
 .search-scope-trigger:hover {
   background: var(--bg-2);
 }
+/* The time dropdown sits between the scope dropdown and the input, so it has
+   square left corners (only the leftmost scope trigger is rounded). */
+.search-time .search-scope-trigger {
+  border-radius: 0;
+  max-width: 130px;
+}
+.search-time-icon {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+.search-scope-trigger.active .search-time-icon {
+  opacity: 1;
+}
 .search-scope-trigger.active {
   background: var(--bubble);
   color: var(--accent);
