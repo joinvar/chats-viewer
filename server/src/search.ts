@@ -251,3 +251,27 @@ export async function search(
   hits.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
   return hits.slice(0, limit);
 }
+
+// Aggregated search for the "all" view: run all three indexes, tag each hit
+// with its source so the client can open it against the right backend, then
+// merge newest-first and cap.
+export async function searchAll(
+  q: string,
+  limit = 100,
+  projectId?: string
+): Promise<SearchHit[]> {
+  const [claude, cursor, codex] = await Promise.all([
+    search(q, limit, "claude", projectId),
+    search(q, limit, "cursor", projectId),
+    search(q, limit, "codex", projectId),
+  ]);
+  const tag = (arr: SearchHit[], source: SearchSource): SearchHit[] =>
+    arr.map((h) => ({ ...h, source }));
+  const hits = [
+    ...tag(claude, "claude"),
+    ...tag(cursor, "cursor"),
+    ...tag(codex, "codex"),
+  ];
+  hits.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
+  return hits.slice(0, limit);
+}

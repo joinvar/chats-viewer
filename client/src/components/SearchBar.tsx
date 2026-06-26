@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Source } from "../api";
+import { api, type View } from "../api";
 import type { ProjectSummary, SearchHit } from "../types";
 import { formatRelative } from "../util";
 
@@ -11,7 +11,7 @@ export function SearchBar({
   onQueryChange,
 }: {
   onOpenHit: (hit: SearchHit) => void;
-  source?: Source;
+  source?: View;
   projects: ProjectSummary[];
   onQueryChange?: (q: string) => void;
 }) {
@@ -135,7 +135,9 @@ export function SearchBar({
             setOpen(true);
           }}
           placeholder={
-            source === "cursor"
+            source === "all"
+              ? "搜索全部工具对话…"
+              : source === "cursor"
               ? "搜索 Cursor 对话…"
               : source === "codex"
               ? "搜索 Codex 对话…"

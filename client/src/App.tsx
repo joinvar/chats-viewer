@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type Source } from "./api";
+import { api, type Source, type View } from "./api";
 import type { ProjectSummary, SessionSummary, Transcript, SearchHit } from "./types";
 import { ProjectList } from "./components/ProjectList";
 import { SessionList } from "./components/SessionList";
@@ -13,11 +13,17 @@ const MAX_FRAC = 0.6; // no single side column wider than 60% of viewport
 const STORAGE_KEY = "chats-viewer:col-widths";
 const VIS_KEY = "chats-viewer:col-visible";
 const SOURCE_KEY = "chats-viewer:source";
+const UNIFIED_KEY = "chats-viewer:unified-mode";
 const SELECTION_KEY = "chats-viewer:selection";
 const CHROME_KEY = "chats-viewer:chrome-hidden";
 
-type Selection = { projectId: string | null; sessionId: string | null };
-type SelectionMap = Partial<Record<Source, Selection>>;
+// In the aggregated ("all") view the user can browse either a flat, time-sorted
+// stream of every conversation ("session"), or the merged project tree
+// ("project"). Per-tool views ignore this.
+type UnifiedMode = "session" | "project";
+
+type Selection = { source?: Source; projectId: string | null; sessionId: string | null };
+type SelectionMap = Partial<Record<View, Selection>>;
 
 function loadSelectionMap(): SelectionMap {
   try {
@@ -30,21 +36,32 @@ function loadSelectionMap(): SelectionMap {
   return {};
 }
 
-function loadSelection(source: Source): Selection {
+function loadSelection(view: View): Selection {
   const m = loadSelectionMap();
-  const e = m[source];
+  const e = m[view];
+  const source =
+    e?.source === "claude" || e?.source === "cursor" || e?.source === "codex"
+      ? e.source
+      : undefined;
   return {
+    source,
     projectId: typeof e?.projectId === "string" ? e.projectId : null,
     sessionId: typeof e?.sessionId === "string" ? e.sessionId : null,
   };
 }
 
-function saveSelection(source: Source, sel: Selection) {
+function saveSelection(view: View, sel: Selection) {
   try {
     const m = loadSelectionMap();
-    m[source] = sel;
+    m[view] = sel;
     localStorage.setItem(SELECTION_KEY, JSON.stringify(m));
   } catch {}
+}
+
+// The backend source the current selection lives in. For per-tool views that's
+// the view itself; for "all" it follows the row the user picked.
+function sourceForView(view: View, fallback: Source): Source {
+  return view === "all" ? fallback : view;
 }
 
 function loadWidths(): { a: number; b: number } {
@@ -72,12 +89,20 @@ function loadVis(): { projects: boolean; sessions: boolean } {
   return { projects: true, sessions: true };
 }
 
-function loadSource(): Source {
+function loadView(): View {
   try {
     const s = localStorage.getItem(SOURCE_KEY);
-    if (s === "cursor" || s === "claude" || s === "codex") return s;
+    if (s === "cursor" || s === "claude" || s === "codex" || s === "all") return s;
   } catch {}
   return "claude";
+}
+
+function loadUnifiedMode(): UnifiedMode {
+  try {
+    const s = localStorage.getItem(UNIFIED_KEY);
+    if (s === "project") return "project";
+  } catch {}
+  return "session";
 }
 
 function loadChromeHidden(): boolean {
@@ -95,10 +120,18 @@ function sourceTitle(source: Source): string {
 }
 
 export default function App() {
-  const [source, setSource] = useState<Source>(loadSource);
+  const [view, setView] = useState<View>(loadView);
+  const [unifiedMode, setUnifiedMode] = useState<UnifiedMode>(loadUnifiedMode);
+  // Backend that the current (project, session) selection lives in.
+  const [activeSource, setActiveSource] = useState<Source>(() => {
+    const v = loadView();
+    return sourceForView(v, loadSelection(v).source ?? "claude");
+  });
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [allSessions, setAllSessions] = useState<SessionSummary[]>([]);
+  const [loadingAllSessions, setLoadingAllSessions] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(
-    () => loadSelection(loadSource()).projectId
+    () => loadSelection(loadView()).projectId
   );
   const [sessionsData, setSessionsData] = useState<{
     projectId: string;
@@ -106,7 +139,7 @@ export default function App() {
     items: SessionSummary[];
   } | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(
-    () => loadSelection(loadSource()).sessionId
+    () => loadSelection(loadView()).sessionId
   );
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [scrollToUuid, setScrollToUuid] = useState<string | null>(null);
@@ -122,6 +155,10 @@ export default function App() {
   // refresh so destructive deletes can never be left armed by accident.
   const [dangerMode, setDangerMode] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(loadChromeHidden);
+
+  // In "all" / by-conversation mode there is no project column and the middle
+  // column shows the global, time-sorted conversation stream instead.
+  const conversationMode = view === "all" && unifiedMode === "session";
 
   function toggleChrome() {
     setChromeHidden((v) => {
@@ -143,15 +180,17 @@ export default function App() {
     });
   }
 
-  function switchSource(next: Source) {
-    if (next === source) return;
-    // Swapping data sources invalidates everything that was keyed by id —
-    // projectId / sessionId are not comparable between sources. But each
-    // source has its own persisted selection, so restore the new source's
-    // last (project, session) instead of forcing the user to start over.
+  function switchView(next: View) {
+    if (next === view) return;
+    // Swapping views invalidates everything keyed by id — project/session ids
+    // are not comparable across tools. Each view keeps its own persisted
+    // selection, so restore that instead of forcing a fresh start.
     const sel = loadSelection(next);
-    setSource(next);
+    const nextSource = sourceForView(next, sel.source ?? "claude");
+    setView(next);
+    setActiveSource(nextSource);
     setProjects([]);
+    setAllSessions([]);
     setProjectId(sel.projectId);
     setSessionsData(null);
     setSessionId(sel.sessionId);
@@ -162,15 +201,45 @@ export default function App() {
     } catch {}
   }
 
-  async function handleDeleteProject(id: string) {
-    const proj = projects.find((p) => p.id === id);
-    const label = proj?.cwd || id;
+  function changeUnifiedMode(next: UnifiedMode) {
+    if (next === unifiedMode) return;
+    setUnifiedMode(next);
+    try {
+      localStorage.setItem(UNIFIED_KEY, next);
+    } catch {}
+  }
+
+  function selectProject(p: ProjectSummary) {
+    const src = p.source ?? sourceForView(view, activeSource);
+    if (p.id === projectId && src === activeSource) return;
+    setActiveSource(src);
+    setProjectId(p.id);
+    setSessionsData(null);
+    setSessionId(null); // sessions effect auto-picks the first one
+    setTranscript(null);
+  }
+
+  function selectSession(s: SessionSummary) {
+    if (s.source) {
+      // Row from the aggregated global stream — it carries its own backend and
+      // project, so jump straight there.
+      setActiveSource(s.source);
+      setProjectId(s.projectId);
+      setSessionId(s.sessionId);
+    } else {
+      setSessionId(s.sessionId);
+    }
+  }
+
+  async function handleDeleteProject(p: ProjectSummary) {
+    const src = p.source ?? sourceForView(view, activeSource);
+    const label = p.cwd || p.id;
     const rootLabel =
-      source === "cursor"
-        ? `~/.cursor/projects/${id}/agent-transcripts`
-        : source === "codex"
+      src === "cursor"
+        ? `~/.cursor/projects/${p.id}/agent-transcripts`
+        : src === "codex"
         ? `~/.codex/sessions（当前项目匹配的所有 session 文件）`
-        : `~/.claude/projects/${id}`;
+        : `~/.claude/projects/${p.id}`;
     if (!window.confirm(`确认删除项目「${label}」？\n\n该项目下所有 session 都会被删除。`)) {
       return;
     }
@@ -178,9 +247,9 @@ export default function App() {
       return;
     }
     try {
-      await api.deleteProject(id, source);
-      setProjects((ps) => ps.filter((p) => p.id !== id));
-      if (projectId === id) {
+      await api.deleteProject(p.id, src);
+      setProjects((ps) => ps.filter((x) => !(x.id === p.id && (x.source ?? src) === src)));
+      if (projectId === p.id && activeSource === src) {
         setProjectId(null);
         setSessionId(null);
         setSessionsData(null);
@@ -191,10 +260,12 @@ export default function App() {
     }
   }
 
-  async function handleRenameSession(sid: string, currentTitle: string) {
-    if (!projectId) return;
-    if (source === "cursor") {
-      setError(`${sourceTitle(source)} 对话不支持重命名`);
+  async function handleRenameSession(s: SessionSummary, currentTitle: string) {
+    const src = s.source ?? activeSource;
+    const pid = s.projectId ?? projectId;
+    if (!pid) return;
+    if (src === "cursor") {
+      setError(`${sourceTitle(src)} 对话不支持重命名`);
       return;
     }
     const input = window.prompt("重命名 session", currentTitle);
@@ -202,91 +273,120 @@ export default function App() {
     const next = input.trim();
     if (!next || next === currentTitle) return;
     try {
-      await api.renameSession(projectId, sid, next, source);
+      await api.renameSession(pid, s.sessionId, next, src);
+      const apply = (list: SessionSummary[]) =>
+        list.map((x) =>
+          x.sessionId === s.sessionId && (x.source ?? src) === src
+            ? { ...x, customTitle: next }
+            : x
+        );
       setSessionsData((d) =>
-        d && d.projectId === projectId
-          ? {
-              ...d,
-              items: d.items.map((s) =>
-                s.sessionId === sid ? { ...s, customTitle: next } : s
-              ),
-            }
-          : d
+        d && d.projectId === pid ? { ...d, items: apply(d.items) } : d
       );
+      setAllSessions((items) => apply(items));
     } catch (e) {
       setError(`重命名失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  async function handleDeleteSession(sid: string) {
-    if (!projectId) return;
-    const sess = sessions.find((s) => s.sessionId === sid);
+  async function handleDeleteSession(s: SessionSummary) {
+    const src = s.source ?? activeSource;
+    const pid = s.projectId ?? projectId;
+    if (!pid) return;
     const label =
-      sess?.customTitle || sess?.agentName || sess?.firstUserText?.slice(0, 60) || sid.slice(0, 8);
+      s.customTitle || s.agentName || s.firstUserText?.slice(0, 60) || s.sessionId.slice(0, 8);
     if (!window.confirm(`确认删除 session「${label}」？`)) return;
     const pathHint =
-      source === "cursor"
-        ? `~/.cursor/projects/${projectId}/agent-transcripts/${sid}/`
-        : source === "codex"
-        ? `~/.codex/sessions 中的 Codex session ${sid}`
-        : `${sid}.jsonl`;
+      src === "cursor"
+        ? `~/.cursor/projects/${pid}/agent-transcripts/${s.sessionId}/`
+        : src === "codex"
+        ? `~/.codex/sessions 中的 Codex session ${s.sessionId}`
+        : `${s.sessionId}.jsonl`;
     if (!window.confirm(`再次确认：将永久删除 ${pathHint}，无法恢复！\n\n继续？`)) return;
     try {
-      await api.deleteSession(projectId, sid, source);
+      await api.deleteSession(pid, s.sessionId, src);
+      const drop = (list: SessionSummary[]) =>
+        list.filter((x) => !(x.sessionId === s.sessionId && (x.source ?? src) === src));
       setSessionsData((d) =>
-        d && d.projectId === projectId
-          ? { ...d, items: d.items.filter((s) => s.sessionId !== sid) }
-          : d
+        d && d.projectId === pid ? { ...d, items: drop(d.items) } : d
       );
-      if (sessionId === sid) {
+      setAllSessions((items) => drop(items));
+      if (sessionId === s.sessionId && activeSource === src) {
         setSessionId(null);
         setTranscript(null);
       }
       // Refresh project list so sessionCount stays accurate.
-      api.projects(source).then(setProjects).catch(() => {});
+      if (view === "all") {
+        if (unifiedMode === "project") api.allProjects().then(setProjects).catch(() => {});
+      } else {
+        api.projects(src).then(setProjects).catch(() => {});
+      }
     } catch (e) {
       setError(`删除 session 失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  // Expose a plain sessions array for rendering / search hit prefill.
+  // Plain sessions array for the per-project middle column.
   const sessions =
-    sessionsData?.projectId === projectId && sessionsData.source === source
+    sessionsData?.projectId === projectId && sessionsData.source === activeSource
       ? sessionsData.items
       : [];
 
+  // Load the projects column for the current view (skip in by-conversation
+  // mode, where the column is hidden).
   useEffect(() => {
+    if (conversationMode) {
+      setProjects([]);
+      return;
+    }
     let cancelled = false;
-    api
-      .projects(source)
-      .then((ps) => {
-        if (cancelled) return;
-        setProjects(ps);
-        // Drop a persisted projectId that no longer exists for this source —
-        // otherwise the sessions fetch 404s and the error banner shows on
-        // every reload after a project is deleted.
-        setProjectId((prev) => {
-          if (!prev) return prev;
-          return ps.some((p) => p.id === prev) ? prev : null;
-        });
-      })
-      .catch((e) => !cancelled && setError(String(e)));
+    const p = view === "all" ? api.allProjects() : api.projects(view);
+    p.then((ps) => {
+      if (cancelled) return;
+      setProjects(ps);
+      // Drop a persisted projectId that no longer exists — otherwise the
+      // sessions fetch 404s and the error banner shows on every reload.
+      setProjectId((prev) => {
+        if (!prev) return prev;
+        return ps.some((x) => x.id === prev) ? prev : null;
+      });
+    }).catch((e) => !cancelled && setError(String(e)));
     return () => {
       cancelled = true;
     };
-  }, [source]);
+  }, [view, unifiedMode]);
 
-  // Persist the current (project, session) per source so reload / source
-  // switch restores it. Writes are tiny and infrequent (one per click).
+  // Load the global, time-sorted conversation stream for by-conversation mode.
   useEffect(() => {
-    saveSelection(source, { projectId, sessionId });
-  }, [source, projectId, sessionId]);
+    if (!conversationMode) {
+      setAllSessions([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingAllSessions(true);
+    api
+      .allSessions()
+      .then((items) => !cancelled && setAllSessions(items))
+      .catch((e) => !cancelled && setError(String(e)))
+      .finally(() => !cancelled && setLoadingAllSessions(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [view, unifiedMode]);
 
+  // Persist the current (source, project, session) per view so reload / view
+  // switch restores it.
   useEffect(() => {
+    saveSelection(view, { source: activeSource, projectId, sessionId });
+  }, [view, activeSource, projectId, sessionId]);
+
+  // Load the sessions for the selected project (skip in by-conversation mode).
+  useEffect(() => {
+    if (conversationMode) return;
     if (!projectId) return;
     let cancelled = false;
     setLoadingSessions(true);
-    const currentSource = source;
+    const currentSource = activeSource;
     api
       .sessions(projectId, currentSource)
       .then((items) => {
@@ -304,47 +404,48 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, source]);
+  }, [projectId, activeSource, conversationMode]);
 
   useEffect(() => {
     if (!projectId || !sessionId) return;
-    // Only fetch once the sessions list is the one that belongs to this
-    // projectId AND actually contains this sessionId. This prevents a brief
-    // window during project switches where (newProjectId, oldSessionId) would
-    // otherwise trigger a 404.
-    if (!sessionsData || sessionsData.projectId !== projectId) return;
-    if (sessionsData.source !== source) return;
-    if (!sessionsData.items.some((s) => s.sessionId === sessionId)) return;
+    // In by-conversation mode the selection is set atomically from one row, so
+    // load straight away. Otherwise wait until the sessions list is the one
+    // that belongs to this (projectId, source) AND contains this sessionId —
+    // this prevents a brief (newProjectId, oldSessionId) 404 during switches.
+    if (!conversationMode) {
+      if (!sessionsData || sessionsData.projectId !== projectId) return;
+      if (sessionsData.source !== activeSource) return;
+      if (!sessionsData.items.some((s) => s.sessionId === sessionId)) return;
+    }
 
     let cancelled = false;
     setLoadingTranscript(true);
     setTranscript(null);
     api
-      .session(projectId, sessionId, source)
+      .session(projectId, sessionId, activeSource)
       .then((t) => !cancelled && setTranscript(t))
       .catch((e) => !cancelled && setError(String(e)))
       .finally(() => !cancelled && setLoadingTranscript(false));
     return () => {
       cancelled = true;
     };
-  }, [projectId, sessionId, sessionsData, source]);
+  }, [projectId, sessionId, activeSource, sessionsData, conversationMode]);
 
   async function refreshTranscript() {
     if (!projectId || !sessionId) return;
     const currentProjectId = projectId;
     const currentSessionId = sessionId;
-    const currentSource = source;
+    const currentSource = activeSource;
     setRefreshingTranscript(true);
     try {
       // Only refetch the transcript — do NOT touch sessionsData here, because
-      // the (projectId, sessionId, sessionsData, source) effect would see a
-      // new sessionsData reference, call setTranscript(null), and reload from
-      // scratch, losing scroll position and selected branch.
+      // the transcript effect would otherwise see a new sessionsData reference,
+      // reset, and reload from scratch, losing scroll position / branch.
       const t = await api.session(currentProjectId, currentSessionId, currentSource);
       if (
         projectId !== currentProjectId ||
         sessionId !== currentSessionId ||
-        source !== currentSource
+        activeSource !== currentSource
       ) {
         return;
       }
@@ -357,8 +458,10 @@ export default function App() {
   }
 
   function openSearchHit(hit: SearchHit) {
+    const src = hit.source ?? sourceForView(view, activeSource);
     // Order matters slightly: set sessionId first so the sessions-load effect
     // can preserve it after the new project's list arrives.
+    setActiveSource(src);
     setSessionId(hit.sessionId);
     setProjectId(hit.projectId);
     setScrollToUuid(hit.uuid);
@@ -388,24 +491,48 @@ export default function App() {
     } catch {}
   }
 
+  const showProjectsCol = vis.projects && !conversationMode;
+  const showSessionsCol = conversationMode || vis.sessions;
+
   return (
     <div className={"app" + (chromeHidden ? " chrome-hidden" : "")}>
       {!chromeHidden && (
         <header className="topbar">
           <div className="brand">chats viewer</div>
-          <SourceSelect value={source} onChange={switchSource} />
+          <SourceSelect value={view} onChange={switchView} />
+          {view === "all" && (
+            <div className="unified-toggle" role="group" aria-label="聚合视图模式">
+              <button
+                className={"unified-seg" + (unifiedMode === "session" ? " on" : "")}
+                onClick={() => changeUnifiedMode("session")}
+                title="所有工具的对话，按时间总排序"
+              >
+                按对话
+              </button>
+              <button
+                className={"unified-seg" + (unifiedMode === "project" ? " on" : "")}
+                onClick={() => changeUnifiedMode("project")}
+                title="所有工具的项目，按最近修改排序"
+              >
+                按项目
+              </button>
+            </div>
+          )}
           <div className="panel-toggles">
-            <button
-              className={"toggle" + (vis.projects ? " on" : "")}
-              onClick={() => toggleVis("projects")}
-              title="Toggle projects panel"
-            >
-              ▤ Projects
-            </button>
+            {!conversationMode && (
+              <button
+                className={"toggle" + (vis.projects ? " on" : "")}
+                onClick={() => toggleVis("projects")}
+                title="Toggle projects panel"
+              >
+                ▤ Projects
+              </button>
+            )}
             <button
               className={"toggle" + (vis.sessions ? " on" : "")}
               onClick={() => toggleVis("sessions")}
               title="Toggle sessions panel"
+              disabled={conversationMode}
             >
               ▤ Sessions
             </button>
@@ -418,7 +545,7 @@ export default function App() {
             </button>
           </div>
           <SearchBar
-            source={source}
+            source={view}
             onOpenHit={openSearchHit}
             projects={projects}
             onQueryChange={setSearchQuery}
@@ -440,13 +567,14 @@ export default function App() {
         </div>
       )}
       <div className="cols">
-        {vis.projects && (
+        {showProjectsCol && (
           <>
             <aside className="col col-projects" style={{ width: widths.a }}>
               <ProjectList
                 projects={projects}
                 selectedId={projectId}
-                onSelect={setProjectId}
+                selectedSource={view === "all" ? activeSource : null}
+                onSelect={selectProject}
                 dangerMode={dangerMode}
                 onDelete={handleDeleteProject}
               />
@@ -454,19 +582,35 @@ export default function App() {
             <Splitter onDrag={resizeA} onEnd={persist} />
           </>
         )}
-        {vis.sessions && (
+        {showSessionsCol && (
           <>
             <aside className="col col-sessions" style={{ width: widths.b }}>
-              <SessionList
-                sessions={sessions}
-                loading={loadingSessions}
-                selectedId={sessionId}
-                onSelect={setSessionId}
-                dangerMode={dangerMode}
-                onDelete={handleDeleteSession}
-                onRename={source !== "cursor" ? handleRenameSession : undefined}
-                source={source}
-              />
+              {conversationMode ? (
+                <SessionList
+                  sessions={allSessions}
+                  loading={loadingAllSessions}
+                  selectedId={sessionId}
+                  selectedSource={activeSource}
+                  onSelect={selectSession}
+                  dangerMode={dangerMode}
+                  onDelete={handleDeleteSession}
+                  onRename={handleRenameSession}
+                  headerLabel="对话"
+                  showTool
+                />
+              ) : (
+                <SessionList
+                  sessions={sessions}
+                  loading={loadingSessions}
+                  selectedId={sessionId}
+                  onSelect={selectSession}
+                  dangerMode={dangerMode}
+                  onDelete={handleDeleteSession}
+                  onRename={handleRenameSession}
+                  source={activeSource}
+                  showTool={view === "all"}
+                />
+              )}
             </aside>
             <Splitter onDrag={resizeB} onEnd={persist} />
           </>
@@ -481,7 +625,7 @@ export default function App() {
               transcript={transcript}
               scrollToUuid={scrollToUuid}
               onConsumedScroll={() => setScrollToUuid(null)}
-              source={source}
+              source={activeSource}
               onRefresh={refreshTranscript}
               refreshing={refreshingTranscript}
               searchQuery={searchQuery}

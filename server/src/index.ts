@@ -11,7 +11,8 @@ import {
   renameSession,
 } from "./projects.js";
 import { parseSession } from "./parser.js";
-import { search } from "./search.js";
+import { search, searchAll } from "./search.js";
+import { listAllProjects, listAllSessions } from "./all.js";
 import {
   listCursorProjects,
   listCursorSessions,
@@ -53,6 +54,26 @@ function pickSource(req: express.Request): Source {
   if (req.query.source === "codex") return "codex";
   return req.query.source === "cursor" ? "cursor" : "claude";
 }
+
+// Aggregated ("all") view: merged, time-sorted listings across all three
+// tools. Each row carries its `source` so the client routes follow-up calls
+// back to the right backend. Declared before the per-tool routes so the static
+// path doesn't get shadowed by `/api/projects/:id/...`.
+app.get("/api/all/projects", async (_req, res) => {
+  try {
+    res.json(await listAllProjects());
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? "error" });
+  }
+});
+
+app.get("/api/all/sessions", async (_req, res) => {
+  try {
+    res.json(await listAllSessions());
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? "error" });
+  }
+});
 
 app.get("/api/projects", async (req, res) => {
   try {
@@ -155,8 +176,12 @@ app.patch("/api/sessions/:projectId/:sessionId", async (req, res) => {
 app.get("/api/search", async (req, res) => {
   try {
     const q = String(req.query.q ?? "");
-    const src = pickSource(req);
     const projectId = req.query.projectId ? String(req.query.projectId) : undefined;
+    if (req.query.source === "all") {
+      res.json(await searchAll(q, 100, projectId));
+      return;
+    }
+    const src = pickSource(req);
     res.json(await search(q, 100, src, projectId));
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });

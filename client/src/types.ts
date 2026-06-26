@@ -78,9 +78,14 @@ export interface SystemEntry extends BaseEntry {
 }
 export type Entry = UserEntry | AssistantEntry | AttachmentEntry | SystemEntry;
 
+export type ToolSource = "claude" | "cursor" | "codex";
+
 export interface SessionMeta {
   sessionId: string;
   projectId: string;
+  // Only set in the aggregated ("all") view so the client can route follow-up
+  // calls back to the right backend. Undefined for the per-tool endpoints.
+  source?: ToolSource;
   cwd?: string;
   customTitle?: string;
   agentName?: string;
@@ -105,6 +110,7 @@ export interface Transcript {
 }
 export interface ProjectSummary {
   id: string;
+  source?: ToolSource;
   cwd: string;
   sessionCount: number;
   lastModified: string;
@@ -112,6 +118,7 @@ export interface ProjectSummary {
 export interface SearchHit {
   projectId: string;
   sessionId: string;
+  source?: ToolSource;
   uuid: string;
   role: string;
   snippet: string;

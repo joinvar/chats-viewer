@@ -68,7 +68,12 @@ npm run install:all
 界面三列，列之间的灰条可以左右拖拽调节宽度，宽度会记住。
 
 - **顶部来源切换**  
-  `Claude Code`、`Cursor`、`Codex` 三种来源可随时切换。
+  `Claude Code`、`Cursor`、`Codex` 三种来源可随时切换。另外有 **`全部（混合）`** 一项，把三种工具汇到一起：
+  - 选「全部」后顶栏出现 **按对话 / 按项目** 切换。
+  - **按对话**：所有工具的会话拉平成一条按时间倒序的总流，每条左侧带工具图标（claude / codex / cursor），点开直接看 transcript。
+  - **按项目**：所有工具的项目合并按最近修改排序，项目和会话行都带工具图标。
+  - 顶部搜索在「全部」下会跨三种工具一起搜，命中结果带上各自来源。
+  - 这套混合视图是独立的，不影响原来按单一工具浏览的模式。
 
 - **左列 · Projects**  
   按来源列出项目/工作区，按最近修改排序。点击切换。
@@ -103,7 +108,8 @@ npm run install:all
   - `GET /api/projects`
   - `GET /api/projects/:id/sessions`
   - `GET /api/sessions/:projectId/:sessionId`
-  - `GET /api/search?q=...`
+  - `GET /api/all/projects`、`GET /api/all/sessions` —「全部（混合）」视图，三种工具合并并标注 `source`
+  - `GET /api/search?q=...`（`source=all` 时跨三种工具）
 - 数据源：
   - `Claude Code` → `~/.claude/projects/<项目>/*.jsonl`
   - `Cursor` → `~/.cursor/projects/<项目>/agent-transcripts/<chatId>/<chatId>.jsonl`
@@ -140,8 +146,9 @@ chats-viewer/
 │       ├── index.ts      # Express 入口
 │       ├── types.ts      # 共享类型
 │       ├── projects.ts   # 列项目、列 session、slug 解码
+│       ├── all.ts        # 「全部（混合）」三工具合并、按时间总排序
 │       ├── parser.ts     # JSONL → Transcript，含分支树 / sidechain
-│       └── search.ts     # 全量索引 + mtime 增量
+│       └── search.ts     # 全量索引 + mtime 增量（含跨工具聚合搜索）
 └── client/
     ├── package.json
     ├── vite.config.ts    # dev 代理 /api → :4000
@@ -157,6 +164,8 @@ chats-viewer/
         └── components/
             ├── ProjectList.tsx
             ├── SessionList.tsx
+            ├── SourceSelect.tsx  # 顶部来源/「全部」切换
+            ├── ToolIcon.tsx      # 三种工具的共享图标
             ├── Transcript.tsx
             ├── TreeView.tsx
             ├── Entry.tsx

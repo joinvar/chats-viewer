@@ -7,8 +7,10 @@ import type {
 } from "./types";
 
 export type Source = "claude" | "cursor" | "codex";
+// The top selector also offers the aggregated cross-tool view.
+export type View = Source | "all";
 
-function withSource(url: string, source: Source): string {
+function withSource(url: string, source: View): string {
   if (source === "claude") return url; // keep default URLs clean
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}source=${source}`;
@@ -76,8 +78,11 @@ export const api = {
     j<SessionSummary[]>(
       withSource(`/api/projects/${encodeURIComponent(projectId)}/sessions`, source)
     ),
+  // Aggregated cross-tool listings. Each row carries its own `source`.
+  allProjects: () => j<ProjectSummary[]>("/api/all/projects"),
+  allSessions: () => j<SessionSummary[]>("/api/all/sessions"),
   session: loadTranscript,
-  search: (q: string, source: Source = "claude", projectId?: string) => {
+  search: (q: string, source: View = "claude", projectId?: string) => {
     let url = `/api/search?q=${encodeURIComponent(q)}`;
     if (projectId) url += `&projectId=${encodeURIComponent(projectId)}`;
     return j<SearchHit[]>(withSource(url, source));

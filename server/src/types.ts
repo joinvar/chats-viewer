@@ -78,9 +78,15 @@ export interface SystemEntry extends BaseEntry {
 
 export type Entry = UserEntry | AssistantEntry | AttachmentEntry | SystemEntry;
 
+export type ToolSource = "claude" | "cursor" | "codex";
+
 export interface SessionMeta {
   sessionId: string;
   projectId: string;
+  // Only set in the aggregated ("all") view so the client can route the
+  // transcript/delete/rename calls back to the right backend. Left undefined
+  // by the per-tool endpoints.
+  source?: ToolSource;
   cwd?: string;
   customTitle?: string;
   agentName?: string;
@@ -108,6 +114,10 @@ export interface Transcript {
 
 export interface ProjectSummary {
   id: string;
+  // Only set in the aggregated ("all") view — project ids can collide across
+  // tools (e.g. claude `D--code-x` vs cursor `d-code-x`), so the source is what
+  // disambiguates which backend a row belongs to.
+  source?: ToolSource;
   cwd: string;
   sessionCount: number;
   lastModified: string;
@@ -116,6 +126,7 @@ export interface ProjectSummary {
 export interface SearchHit {
   projectId: string;
   sessionId: string;
+  source?: ToolSource;
   uuid: string;
   role: string;
   snippet: string;
