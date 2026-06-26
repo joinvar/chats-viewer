@@ -1449,6 +1449,15 @@ body.col-resizing * {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.hit-tool-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  opacity: 0.9;
+}
 .hit-role {
   font-size: 10px;
   color: var(--fg-mute);

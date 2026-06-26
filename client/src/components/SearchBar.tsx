@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type View } from "../api";
 import type { ProjectSummary, SearchHit } from "../types";
 import { formatRelative } from "../util";
+import { ToolIcon } from "./ToolIcon";
 
 export function SearchBar({
   onOpenHit,
@@ -161,6 +162,11 @@ export function SearchBar({
               }}
             >
               <div className="hit-title">
+                {h.source && (
+                  <span className="hit-tool-icon" title={h.source}>
+                    <ToolIcon source={h.source} size={13} />
+                  </span>
+                )}
                 {h.customTitle || shortCwd(h.cwd) || h.sessionId.slice(0, 8)}
                 <span className="hit-role">{h.role}</span>
                 {h.timestamp && (
