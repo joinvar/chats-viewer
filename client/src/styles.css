@@ -744,6 +744,56 @@ body.col-resizing * {
   color: var(--fg-dim);
 }
 
+/* A collapsed agent turn: the assistant's replies for one user prompt, folded
+   away so the tree reads as the user's prompt skeleton. Quieter than a user
+   row but more present than a tool group, since it's the main folded element.
+   Click expands; hover lifts it to stay discoverable. */
+.tree-node.tree-agent-group {
+  color: var(--fg-mute);
+  font-size: 11.5px;
+}
+.tree-node.tree-agent-group:hover {
+  background: var(--bg-2);
+  color: var(--fg-dim);
+}
+/* Keep the scroll-tracking highlight readable — without this the muted base
+   color above (equal specificity, later in source) would win over the shared
+   .tree-node.tracking rule. */
+.tree-node.tree-agent-group.tracking {
+  color: var(--fg);
+}
+.tree-node.tree-agent-group .preview {
+  font-style: italic;
+}
+.tn-caret {
+  flex: 0 0 auto;
+  width: 8px;
+  text-align: center;
+  font-size: 9px;
+  color: var(--assistant);
+}
+/* The "▾ Agent" header above an expanded agent turn — mirrors the tool group's
+   collapse control so the two tiers read consistently. */
+.tree-agent-collapse {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 1px 6px;
+  margin: 1px 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-mute);
+}
+.tree-agent-collapse:hover {
+  background: var(--bg-2);
+  color: var(--fg-dim);
+}
+
 .tree-node .branch-badge {
   font-size: 10px;
   color: var(--accent-2);

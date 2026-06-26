@@ -58,45 +58,99 @@ export function TreeView(props: {
     );
   }
 
-  // Render a node plus its subtree, collapsing linear chains into the same column.
-  // Only emits a .tn-children container at real branch points (> 1 child).
-  // Runs of consecutive pure-tool nodes (no branching) are collapsed into a
-  // single ToolGroupNode to match the chat view's noise reduction.
-  function Chain({ startUuid }: { startUuid: string }): JSX.Element {
-    const rows: JSX.Element[] = [];
-    let cur: string | null = startUuid;
+  // Render a single agent turn's contents: the assistant's natural-language
+  // replies stay as visible Rows, while runs of consecutive pure-tool nodes
+  // (tool_use / tool_result / thinking / attachments) collapse into nested
+  // ToolGroupNodes — the same noise reduction the chat view uses. Fills an
+  // expanded AgentGroupNode. The run is linear (branch points never enter an
+  // agent buffer), so a flat left-to-right pass is enough.
+  function renderAgentRun(uuids: string[]): JSX.Element[] {
+    const out: JSX.Element[] = [];
     let toolBuf: string[] = [];
     const flushTools = () => {
       if (toolBuf.length === 0) return;
-      const uuids = toolBuf;
-      rows.push(
+      const u = toolBuf;
+      out.push(
         <ToolGroupNode
-          key={uuids[0] + ":tg"}
-          uuids={uuids}
-          selectedUuid={selectedUuid}
+          key={u[0] + ":tg"}
+          uuids={u}
           clickedUuid={clickedUuid ?? null}
           trackedUuid={trackedUuid ?? null}
-          renderRow={(u) => <Row key={u} uuid={u} isBranchPoint={false} />}
+          renderRow={(x) => <Row key={x} uuid={x} isBranchPoint={false} />}
         />
       );
       toolBuf = [];
+    };
+    for (const u of uuids) {
+      const e = byUuid[u];
+      if (!e) continue;
+      if (isPureToolEntry(e)) {
+        toolBuf.push(u);
+        continue;
+      }
+      flushTools();
+      out.push(<Row key={u} uuid={u} isBranchPoint={false} />);
+    }
+    flushTools();
+    return out;
+  }
+
+  // Render a node plus its subtree, collapsing linear chains into the same
+  // column. Only emits a .tn-children container at real branch points (> 1
+  // child). Everything between two real user messages — the assistant's
+  // replies and their tool/system steps — collapses into a single
+  // AgentGroupNode so the tree reads as the user's prompt skeleton by default.
+  // A run with no natural-language reply (pure tool/system plumbing) falls
+  // back to the plainer "··· N 步" ToolGroupNode.
+  function Chain({ startUuid }: { startUuid: string }): JSX.Element {
+    const rows: JSX.Element[] = [];
+    let cur: string | null = startUuid;
+    let agentBuf: string[] = [];
+    const flushAgent = () => {
+      if (agentBuf.length === 0) return;
+      const uuids = agentBuf;
+      agentBuf = [];
+      const textCount = uuids.filter((u) => hasAssistantText(byUuid[u])).length;
+      if (textCount === 0) {
+        rows.push(
+          <ToolGroupNode
+            key={uuids[0] + ":tg"}
+            uuids={uuids}
+              clickedUuid={clickedUuid ?? null}
+            trackedUuid={trackedUuid ?? null}
+            renderRow={(u) => <Row key={u} uuid={u} isBranchPoint={false} />}
+          />
+        );
+        return;
+      }
+      rows.push(
+        <AgentGroupNode
+          key={uuids[0] + ":ag"}
+          uuids={uuids}
+          textCount={textCount}
+          clickedUuid={clickedUuid ?? null}
+          trackedUuid={trackedUuid ?? null}
+          renderExpanded={() => <Fragment>{renderAgentRun(uuids)}</Fragment>}
+        />
+      );
     };
     while (cur) {
       const e = byUuid[cur];
       if (!e) break;
       const kids: string[] = childrenOf[cur] ?? [];
       const branching = kids.length > 1;
-      // Buffer pure-tool nodes that aren't branch points; they'll render as
-      // a single collapsed group when we hit a non-tool or a branch.
-      if (isPureToolEntry(e) && !branching) {
-        toolBuf.push(cur);
+      // Buffer agent content (assistant replies + tool/system plumbing) that
+      // isn't a branch point; it renders as a single collapsed AgentGroupNode
+      // when we reach the next real user message or a branch.
+      if (!isRealUserMessage(e) && !branching) {
+        agentBuf.push(cur);
         if (kids.length === 1) {
           cur = kids[0];
           continue;
         }
         break;
       }
-      flushTools();
+      flushAgent();
       rows.push(<Row key={cur} uuid={cur} isBranchPoint={branching} />);
       if (kids.length === 1) {
         cur = kids[0];
@@ -113,7 +167,7 @@ export function TreeView(props: {
       }
       break;
     }
-    flushTools();
+    flushAgent();
     return <Fragment>{rows}</Fragment>;
   }
 
@@ -140,27 +194,24 @@ export function TreeView(props: {
 
 // A run of consecutive pure-tool nodes inside a linear chain — collapsed
 // to "··· N 步" by default, matching the chat view's noise reduction.
-// Auto-expands once when the user actively lands on a node inside it
-// (selection / clicked), but NOT when the chat-scroll tracker passes
-// through — passive tracking should highlight the placeholder, not
-// disturb the user's collapse choice. Branch points are never grouped.
-// Module-level so React preserves its useState across TreeView re-renders.
+// Auto-expands once when the user actively navigates to a node inside it
+// (a tree click or search hit sets clickedUuid), but NOT for the passive
+// initial/persisted selection nor when the chat-scroll tracker passes
+// through — those should highlight the placeholder, not force the group open
+// on load. Branch points are never grouped. Module-level so React preserves
+// its useState across TreeView re-renders.
 function ToolGroupNode({
   uuids,
-  selectedUuid,
   clickedUuid,
   trackedUuid,
   renderRow,
 }: {
   uuids: string[];
-  selectedUuid: string | null;
   clickedUuid: string | null;
   trackedUuid: string | null;
   renderRow: (uuid: string) => JSX.Element;
 }) {
-  const containsActive = uuids.some(
-    (u) => u === selectedUuid || u === clickedUuid
-  );
+  const containsActive = uuids.some((u) => u === clickedUuid);
   const [userExpanded, setUserExpanded] = useState(false);
   const [autoExpanded, setAutoExpanded] = useState(containsActive);
   useEffect(() => {
@@ -199,6 +250,95 @@ function ToolGroupNode({
     >
       <span className="preview">··· {uuids.length} 步</span>
     </button>
+  );
+}
+
+// A full agent turn — the assistant's natural-language replies plus their
+// tool/system steps between two user messages — collapsed to "Agent · N 条"
+// by default so the tree reads as the user's prompt skeleton. Click expands
+// to the assistant replies; the tool steps inside stay folded in their own
+// nested ToolGroupNodes (two tiers). Auto-expands once when the user actively
+// navigates to a node inside it (a tree click or search hit sets clickedUuid),
+// but NOT for the passive initial/persisted selection — otherwise the last
+// turn, which contains the conversation's selected leaf, would always open on
+// load. Nor when the chat-scroll tracker merely passes through: that just
+// highlights the placeholder. Module-level so React preserves its useState
+// across TreeView re-renders.
+function AgentGroupNode({
+  uuids,
+  textCount,
+  clickedUuid,
+  trackedUuid,
+  renderExpanded,
+}: {
+  uuids: string[];
+  textCount: number;
+  clickedUuid: string | null;
+  trackedUuid: string | null;
+  renderExpanded: () => JSX.Element;
+}) {
+  const containsActive = uuids.some((u) => u === clickedUuid);
+  const [userExpanded, setUserExpanded] = useState(false);
+  const [autoExpanded, setAutoExpanded] = useState(containsActive);
+  useEffect(() => {
+    if (containsActive) setAutoExpanded(true);
+  }, [containsActive]);
+  const expanded = userExpanded || autoExpanded;
+  if (expanded) {
+    return (
+      <>
+        <button
+          className="tree-agent-collapse"
+          onClick={() => {
+            setUserExpanded(false);
+            setAutoExpanded(false);
+          }}
+          title="收起 Agent 对话"
+        >
+          <span className="tn-caret" aria-hidden>
+            ▾
+          </span>
+          <span>Agent</span>
+        </button>
+        {renderExpanded()}
+      </>
+    );
+  }
+  // tracking ⇒ the chat scroll anchor is on one of our hidden members. Show
+  // the highlight on the placeholder so the user still sees where they are in
+  // the tree, without forcing the turn open. data-uuids lets the parent's
+  // scrollIntoView fall back to this element when the actual tn-{uuid} isn't
+  // in the DOM.
+  const tracking = !!trackedUuid && uuids.includes(trackedUuid);
+  return (
+    <button
+      className={"tree-node tree-agent-group" + (tracking ? " tracking" : "")}
+      data-uuids={uuids.join(" ")}
+      onClick={() => setUserExpanded(true)}
+      title={`Agent ${textCount} 条回复 — 点击展开`}
+    >
+      <span className="tn-caret" aria-hidden>
+        ▸
+      </span>
+      <span className="preview">Agent · {textCount} 条</span>
+    </button>
+  );
+}
+
+// A real user message — a user-role entry carrying actual input, not a
+// tool_result wrapper (the API encodes tool outputs as user-role messages).
+// These stay as visible Rows; everything else folds into the agent turn.
+function isRealUserMessage(e: Entry | undefined): boolean {
+  return !!e && e.kind === "user" && !isToolResultEntry(e);
+}
+
+// True when an assistant entry contains a non-empty natural-language reply.
+// Used to count "Agent · N 条" and to decide whether an agent run is a real
+// turn (has text) or pure tool/system plumbing (falls back to a tool group).
+function hasAssistantText(e: Entry | undefined): boolean {
+  if (!e || e.kind !== "assistant") return false;
+  return (e.content as ContentBlock[]).some(
+    (b) => b.type === "text" && b.text.trim().length > 0
   );
 }
 
