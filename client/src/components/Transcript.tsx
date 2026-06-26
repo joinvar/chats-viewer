@@ -22,6 +22,8 @@ const TREE_W_KEY = "chats-viewer:tree-width";
 const VIEW_MODE_KEY = "chats-viewer:view-mode";
 const BRANCH_KEY = "chats-viewer:branch";
 const SCROLL_KEY = "chats-viewer:scroll";
+const SCROLL_DUR_KEY = "chats-viewer:scroll-dur";
+const SCROLL_DUR_DEFAULT = 200;
 const PER_SESSION_CAP = 50;
 const TREE_MIN = 180;
 const TREE_DEFAULT = 320;
@@ -67,6 +69,18 @@ function loadTreeWidth(): number {
   return TREE_DEFAULT;
 }
 
+// Global (not per-session) scroll-animation duration in ms. 0 = instant jump.
+function loadScrollDur(): number {
+  try {
+    const s = localStorage.getItem(SCROLL_DUR_KEY);
+    if (s != null) {
+      const n = Number(s);
+      if (Number.isFinite(n) && n >= 0 && n <= 2000) return n;
+    }
+  } catch {}
+  return SCROLL_DUR_DEFAULT;
+}
+
 function loadViewMode(): { showAll: boolean; showTree: boolean } {
   try {
     const s = localStorage.getItem(VIEW_MODE_KEY);
@@ -108,6 +122,13 @@ export function TranscriptView(props: {
   const [showTree, setShowTree] = useState(() => loadViewMode().showTree);
   const [showAll, setShowAll] = useState(() => loadViewMode().showAll);
   const [treeWidth, setTreeWidth] = useState(loadTreeWidth);
+  const [scrollDurMs, setScrollDurMs] = useState(loadScrollDur);
+  function changeScrollDur(v: number) {
+    setScrollDurMs(v);
+    try {
+      localStorage.setItem(SCROLL_DUR_KEY, String(v));
+    } catch {}
+  }
 
   function persistViewMode(next: { showAll: boolean; showTree: boolean }) {
     try {
@@ -344,7 +365,7 @@ export function TranscriptView(props: {
     // auto-expands because clickedNode now matches one of its entries, but
     // that expansion runs in a following render. Retry a few frames so we
     // catch the element once the group's children have mounted.
-    scrollHitWhenReady(scrollToUuid, onConsumedScroll);
+    scrollHitWhenReady(scrollToUuid, onConsumedScroll, scrollDurMs);
   }, [scrollToUuid, pathEntries, byUuid, showAll, isLinearSource, selectedLeaf]);
 
   // Restore scroll position once per session, after pathEntries has settled
@@ -466,7 +487,7 @@ export function TranscriptView(props: {
     if (!innerScroll) return;
     const el = document.getElementById("e-" + innerScroll);
     if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      animateScrollToCenter(el, scrollDurMs);
       el.classList.add("flash");
       setTimeout(() => el.classList.remove("flash"), 3600);
     }
@@ -546,6 +567,23 @@ export function TranscriptView(props: {
             >
               ⎇ Tree {hasBranches && <span className="dot">•</span>}
             </button>
+            <label
+              className="scroll-speed"
+              title="点击 tree 节点跳转时的滑动时长（0 = 瞬间到位）"
+            >
+              <span className="scroll-speed-icon">⇅</span>
+              <input
+                type="range"
+                min={0}
+                max={600}
+                step={50}
+                value={scrollDurMs}
+                onChange={(e) => changeScrollDur(Number(e.target.value))}
+              />
+              <span className="scroll-speed-val">
+                {scrollDurMs === 0 ? "瞬间" : scrollDurMs + "ms"}
+              </span>
+            </label>
           </div>
         </div>
       )}
@@ -663,17 +701,56 @@ function ToolGroupChip({
   );
 }
 
+// Center `el` inside its `.entries` host over `duration` ms. duration <= 0
+// snaps instantly. We animate scrollTop by hand (rAF + easing) rather than
+// native scrollIntoView({behavior:"smooth"}) because the native duration
+// scales with distance and isn't tunable — here the user controls it via the
+// toolbar slider. The module-level token cancels any in-flight animation so
+// rapid clicks don't fight. (We also dropped `scroll-behavior: smooth` from
+// `.entries` so the per-frame scrollTop writes aren't re-smoothed by CSS.)
+let scrollAnimToken = 0;
+function animateScrollToCenter(el: HTMLElement, duration: number) {
+  const host = el.closest(".entries") as HTMLElement | null;
+  if (!host) {
+    el.scrollIntoView({ block: "center" });
+    return;
+  }
+  const hostRect = host.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  const delta =
+    elRect.top - hostRect.top - (host.clientHeight - el.clientHeight) / 2;
+  const start = host.scrollTop;
+  const max = host.scrollHeight - host.clientHeight;
+  const target = Math.max(0, Math.min(max, start + delta));
+  const dist = target - start;
+  const token = ++scrollAnimToken;
+  if (duration <= 0 || Math.abs(dist) < 2) {
+    host.scrollTop = target;
+    return;
+  }
+  const t0 = performance.now();
+  const ease = (t: number) =>
+    t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  const step = (now: number) => {
+    if (token !== scrollAnimToken) return;
+    const p = Math.min(1, (now - t0) / duration);
+    host.scrollTop = start + dist * ease(p);
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 // Retry scrollIntoView for a few animation frames so that if the target
 // entry was inside a just-auto-expanded group chip (chat or tree side),
 // we still find it once React commits the expansion. Without this,
 // search hits into collapsed groups silently scroll nowhere.
-function scrollHitWhenReady(uuid: string, onDone: () => void) {
+function scrollHitWhenReady(uuid: string, onDone: () => void, duration: number) {
   let attempts = 6;
   const tryOnce = () => {
     const el = document.getElementById("e-" + uuid);
     const treeEl = document.getElementById("tn-" + uuid);
     if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      animateScrollToCenter(el, duration);
       el.classList.add("flash");
       setTimeout(() => el.classList.remove("flash"), 3600);
     }
