@@ -1491,8 +1491,17 @@ body.col-resizing * {
   outline: none;
   border-color: var(--accent);
 }
+.search-time-custom-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.search-time-custom-actions .search-time-add-btn {
+  margin-left: 0;
+}
 .search-time-clear {
-  margin: 4px 2px 2px;
+  margin: 4px 2px 2px auto;
   padding: 3px 8px;
   font-size: 11px;
   color: var(--fg-mute);
