@@ -9,6 +9,8 @@ import type {
 export type Source = "claude" | "cursor" | "codex";
 // The top selector also offers the aggregated cross-tool view.
 export type View = Source | "all";
+export type ProjectSearchScope = { source: Source; projectId: string };
+export type SearchRole = "all" | "user" | "assistant";
 
 function withSource(url: string, source: View): string {
   if (source === "claude") return url; // keep default URLs clean
@@ -87,10 +89,16 @@ export const api = {
     source: View = "claude",
     projectId?: string,
     since?: string,
-    until?: string
+    until?: string,
+    projectScopes?: ProjectSearchScope[],
+    role: SearchRole = "all"
   ) => {
     let url = `/api/search?q=${encodeURIComponent(q)}`;
     if (projectId) url += `&projectId=${encodeURIComponent(projectId)}`;
+    if (projectScopes?.length) {
+      url += `&projectScopes=${encodeURIComponent(JSON.stringify(projectScopes))}`;
+    }
+    if (role !== "all") url += `&role=${encodeURIComponent(role)}`;
     if (since) url += `&since=${encodeURIComponent(since)}`;
     if (until) url += `&until=${encodeURIComponent(until)}`;
     return j<SearchHit[]>(withSource(url, source));

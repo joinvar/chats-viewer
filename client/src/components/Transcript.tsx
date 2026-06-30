@@ -616,6 +616,7 @@ export function TranscriptView(props: {
                 key={item.entry.uuid}
                 transcript={transcript}
                 entry={item.entry}
+                forceExpanded={item.entry.uuid === scrollToUuid}
               />
             )
           )}
@@ -682,7 +683,12 @@ function ToolGroupChip({
           ▾ 收起 {entries.length} 步
         </button>
         {entries.map((e) => (
-          <EntryView key={e.uuid} transcript={transcript} entry={e} />
+          <EntryView
+            key={e.uuid}
+            transcript={transcript}
+            entry={e}
+            forceExpanded={e.uuid === scrollToUuid}
+          />
         ))}
       </div>
     );
@@ -757,7 +763,7 @@ function scrollHitWhenReady(uuid: string, onDone: () => void, duration: number) 
     if (treeEl) {
       treeEl.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-    if (el || treeEl || attempts <= 0) {
+    if (el || attempts <= 0) {
       onDone();
       return;
     }

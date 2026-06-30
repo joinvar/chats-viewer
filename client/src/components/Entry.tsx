@@ -15,7 +15,7 @@ import { ToolUse } from "./ToolUse";
 import { ToolResult } from "./ToolResult";
 import { Thinking } from "./Thinking";
 import { SidechainBlock } from "./Sidechain";
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import {
   formatTime,
   stripSystemReminders,
@@ -26,15 +26,21 @@ import {
 export function EntryView({
   transcript,
   entry,
+  forceExpanded = false,
 }: {
   transcript: Transcript;
   entry: Entry;
+  forceExpanded?: boolean;
 }) {
   const toolResult = isToolResultEntry(entry);
   const pureTool = isPureToolEntry(entry);
   const [chipExpanded, setChipExpanded] = useState(false);
 
-  if (pureTool && !chipExpanded) {
+  useLayoutEffect(() => {
+    if (forceExpanded) setChipExpanded(true);
+  }, [forceExpanded]);
+
+  if (pureTool && !chipExpanded && !forceExpanded) {
     const summary = pureToolEntrySummary(entry);
     const variantClass =
       entry.kind === "attachment"

@@ -15,6 +15,11 @@ import {
 import type { SearchHit, Entry, ContentBlock } from "./types.js";
 
 export type SearchSource = "claude" | "cursor" | "codex";
+export type SearchRole = "user" | "assistant";
+export interface ProjectSearchScope {
+  source: SearchSource;
+  projectId: string;
+}
 
 interface IndexRow {
   projectId: string;
@@ -36,6 +41,11 @@ interface SourceIndex {
   metas: Record<string, SessionMetaCache>;
   mtimes: Record<string, number>;
   lastBuild: number;
+}
+
+interface TextSegment {
+  text: string;
+  role: string;
 }
 
 const indexes: Record<SearchSource, SourceIndex> = {
@@ -164,17 +174,19 @@ async function ensureIndex(source: SearchSource): Promise<void> {
         cwd: t.meta.cwd,
       };
       for (const e of t.entries) {
-        const text = extractText(e);
-        if (!text) continue;
-        idx.rows.push({
-          projectId,
-          sessionId,
-          uuid: e.uuid,
-          role: e.kind,
-          text,
-          textLower: text.toLowerCase(),
-          timestamp: e.timestamp,
-        });
+        const segments = extractTextSegments(e);
+        for (const { text, role } of segments) {
+          if (!text) continue;
+          idx.rows.push({
+            projectId,
+            sessionId,
+            uuid: e.uuid,
+            role,
+            text,
+            textLower: text.toLowerCase(),
+            timestamp: e.timestamp,
+          });
+        }
       }
       idx.mtimes[`${projectId}::${sessionId}`] = seen[`${projectId}::${sessionId}`];
     } catch {
@@ -183,61 +195,63 @@ async function ensureIndex(source: SearchSource): Promise<void> {
   }
 }
 
-function extractText(e: Entry): string {
+function extractTextSegments(e: Entry): TextSegment[] {
   if (e.kind === "user") {
-    if (typeof e.content === "string") return e.content;
-    const parts: string[] = [];
+    if (typeof e.content === "string") return [{ text: e.content, role: "user" }];
+    const segments: TextSegment[] = [];
     for (const b of e.content as ContentBlock[]) {
-      if (b.type === "text") parts.push(b.text);
+      if (b.type === "text") segments.push({ text: b.text, role: "user" });
       else if (b.type === "tool_result") {
-        if (typeof b.content === "string") parts.push(b.content);
-        else if (Array.isArray(b.content)) {
-          for (const c of b.content) if (c.text) parts.push(c.text);
+        if (typeof b.content === "string") {
+          segments.push({ text: b.content, role: "tool result" });
+        } else if (Array.isArray(b.content)) {
+          for (const c of b.content) {
+            if (c.text) segments.push({ text: c.text, role: "tool result" });
+          }
         }
       }
     }
-    return parts.join("\n");
+    return segments;
   }
   if (e.kind === "assistant") {
-    const parts: string[] = [];
+    const segments: TextSegment[] = [];
     for (const b of e.content as ContentBlock[]) {
-      if (b.type === "text") parts.push(b.text);
-      else if (b.type === "thinking") parts.push(b.thinking);
+      if (b.type === "text") segments.push({ text: b.text, role: "assistant" });
+      else if (b.type === "thinking") {
+        segments.push({ text: b.thinking, role: "thinking" });
+      }
     }
-    return parts.join("\n");
+    return segments;
   }
-  return "";
+  return [];
 }
 
 export async function search(
   q: string,
   limit = 100,
   source: SearchSource = "claude",
-  projectId?: string,
+  projectId?: string | string[],
   // ISO bounds, inclusive. Rows are filtered by their entry timestamp so the
   // limit cap applies *after* the time window, not before.
   since?: string,
-  until?: string
+  until?: string,
+  role?: SearchRole
 ): Promise<SearchHit[]> {
   await ensureIndex(source);
   const ql = q.toLowerCase();
   if (!ql) return [];
   const idx = indexes[source];
   const hits: SearchHit[] = [];
+  const projectIds = Array.isArray(projectId) ? new Set(projectId) : null;
   for (const r of idx.rows) {
-    if (projectId && r.projectId !== projectId) continue;
+    if (projectIds ? !projectIds.has(r.projectId) : projectId && r.projectId !== projectId)
+      continue;
     if (since && (r.timestamp || "") < since) continue;
     if (until && (r.timestamp || "") > until) continue;
+    if (role && r.role !== role) continue;
     const i = r.textLower.indexOf(ql);
     if (i < 0) continue;
-    const start = Math.max(0, i - 80);
-    const end = Math.min(r.text.length, i + ql.length + 80);
-    // Collapse all whitespace (including newlines) to single spaces so the
-    // matched word stays visible in a 2-line clamped snippet — otherwise
-    // newlines in the leading 80 chars push the match out of view.
-    let snippet = r.text.slice(start, end).replace(/\s+/g, " ").trim();
-    if (start > 0) snippet = "…" + snippet;
-    if (end < r.text.length) snippet = snippet + "…";
+    const snippet = makeSnippet(r.text, q);
     const metaKey = `${r.projectId}::${r.sessionId}`;
     const m = idx.metas[metaKey] ?? {};
     hits.push({
@@ -266,12 +280,18 @@ export async function searchAll(
   limit = 100,
   projectId?: string,
   since?: string,
-  until?: string
+  until?: string,
+  projectScopes?: ProjectSearchScope[],
+  role?: SearchRole
 ): Promise<SearchHit[]> {
+  const scopedIds = (source: SearchSource): string | string[] | undefined => {
+    if (!projectScopes) return projectId;
+    return projectScopes.filter((s) => s.source === source).map((s) => s.projectId);
+  };
   const [claude, cursor, codex] = await Promise.all([
-    search(q, limit, "claude", projectId, since, until),
-    search(q, limit, "cursor", projectId, since, until),
-    search(q, limit, "codex", projectId, since, until),
+    search(q, limit, "claude", scopedIds("claude"), since, until, role),
+    search(q, limit, "cursor", scopedIds("cursor"), since, until, role),
+    search(q, limit, "codex", scopedIds("codex"), since, until, role),
   ]);
   const tag = (arr: SearchHit[], source: SearchSource): SearchHit[] =>
     arr.map((h) => ({ ...h, source }));
@@ -282,4 +302,22 @@ export async function searchAll(
   ];
   hits.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
   return hits.slice(0, limit);
+}
+
+function makeSnippet(text: string, query: string): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  const ql = query.toLowerCase();
+  const i = compact.toLowerCase().indexOf(ql);
+  if (i < 0) return compact.slice(0, 180);
+
+  // Keep the hit very close to the beginning so the two-line preview always
+  // shows the searched term, even for long logs or minified JSON-like output.
+  const before = 32;
+  const after = 120;
+  const start = Math.max(0, i - before);
+  const end = Math.min(compact.length, i + query.length + after);
+  let snippet = compact.slice(start, end);
+  if (start > 0) snippet = "…" + snippet;
+  if (end < compact.length) snippet += "…";
+  return snippet;
 }

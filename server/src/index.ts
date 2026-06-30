@@ -11,7 +11,12 @@ import {
   renameSession,
 } from "./projects.js";
 import { parseSession } from "./parser.js";
-import { search, searchAll } from "./search.js";
+import {
+  search,
+  searchAll,
+  type ProjectSearchScope,
+  type SearchRole,
+} from "./search.js";
 import { listAllProjects, listAllSessions } from "./all.js";
 import {
   listCursorProjects,
@@ -53,6 +58,35 @@ type Source = "claude" | "cursor" | "codex";
 function pickSource(req: express.Request): Source {
   if (req.query.source === "codex") return "codex";
   return req.query.source === "cursor" ? "cursor" : "claude";
+}
+
+function parseProjectScopes(value: unknown): ProjectSearchScope[] | undefined {
+  if (typeof value !== "string" || !value) return undefined;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(raw)) return undefined;
+  const out: ProjectSearchScope[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const source = (item as any).source;
+    const projectId = (item as any).projectId;
+    if (
+      (source === "claude" || source === "cursor" || source === "codex") &&
+      typeof projectId === "string" &&
+      projectId
+    ) {
+      out.push({ source, projectId });
+    }
+  }
+  return out.length ? out : undefined;
+}
+
+function parseSearchRole(value: unknown): SearchRole | undefined {
+  return value === "user" || value === "assistant" ? value : undefined;
 }
 
 // Aggregated ("all") view: merged, time-sorted listings across all three
@@ -177,14 +211,16 @@ app.get("/api/search", async (req, res) => {
   try {
     const q = String(req.query.q ?? "");
     const projectId = req.query.projectId ? String(req.query.projectId) : undefined;
+    const projectScopes = parseProjectScopes(req.query.projectScopes);
     const since = req.query.since ? String(req.query.since) : undefined;
     const until = req.query.until ? String(req.query.until) : undefined;
+    const role = parseSearchRole(req.query.role);
     if (req.query.source === "all") {
-      res.json(await searchAll(q, 100, projectId, since, until));
+      res.json(await searchAll(q, 100, projectId, since, until, projectScopes, role));
       return;
     }
     const src = pickSource(req);
-    res.json(await search(q, 100, src, projectId, since, until));
+    res.json(await search(q, 100, src, projectId, since, until, role));
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }

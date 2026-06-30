@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type View } from "../api";
-import type { ProjectSummary, SearchHit } from "../types";
+import { api, type ProjectSearchScope, type SearchRole, type View } from "../api";
+import type { ProjectSummary, SearchHit, ToolSource } from "../types";
 import { formatRelative } from "../util";
 import { ToolIcon } from "./ToolIcon";
 
@@ -13,6 +13,11 @@ const PRESETS_KEY = "chats-viewer:time-presets-h"; // hours-based (v2)
 const OLD_PRESETS_KEY = "chats-viewer:time-presets"; // legacy days / Preset[]
 const DEFAULT_PRESET_HOURS = [6, 12, 24, 48, 72, 168, 720]; // 6h,12h,1/2/3/7/30天
 const MAX_PRESET_HOURS = 366 * 24;
+const ROLE_OPTIONS: Array<{ value: SearchRole; label: string; menuLabel: string }> = [
+  { value: "all", label: "不限", menuLabel: "不限发言方" },
+  { value: "user", label: "User", menuLabel: "只看 User" },
+  { value: "assistant", label: "Agent", menuLabel: "只看 Agent" },
+];
 
 function presetKey(hours: number): string {
   return "h" + hours;
@@ -98,6 +103,14 @@ function rangeHours(range: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+interface ScopeOption {
+  key: string;
+  label: string;
+  title?: string;
+  projectId?: string;
+  projects: ProjectSummary[];
+}
+
 export function SearchBar({
   onOpenHit,
   source = "claude",
@@ -113,17 +126,20 @@ export function SearchBar({
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [scopeProjectId, setScopeProjectId] = useState<string | null>(null);
+  const [scopeKey, setScopeKey] = useState<string | null>(null);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [timeRange, setTimeRange] = useState<string>(loadRange);
   const [presets, setPresets] = useState<number[]>(loadPresets);
   const [addD, setAddD] = useState<string>(""); // 天
   const [addH, setAddH] = useState<string>(""); // 小时
   const [timeOpen, setTimeOpen] = useState(false);
+  const [roleFilter, setRoleFilter] = useState<SearchRole>("all");
+  const [roleOpen, setRoleOpen] = useState(false);
   const timer = useRef<number | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const scopeRef = useRef<HTMLDivElement | null>(null);
   const timeRef = useRef<HTMLDivElement | null>(null);
+  const roleRef = useRef<HTMLDivElement | null>(null);
 
   // Clear results AND reset scope when the user swaps data sources — stale
   // claude hits in a cursor view (or vice versa) wouldn't map to any real
@@ -131,8 +147,22 @@ export function SearchBar({
   useEffect(() => {
     setHits([]);
     setQ("");
-    setScopeProjectId(null);
+    setScopeKey(null);
   }, [source]);
+
+  const scopeOptions = useMemo(
+    () => buildScopeOptions(projects, source === "all"),
+    [projects, source]
+  );
+
+  const selectedScope = useMemo(
+    () => scopeOptions.find((x) => x.key === scopeKey),
+    [scopeOptions, scopeKey]
+  );
+
+  useEffect(() => {
+    if (scopeKey && !selectedScope) setScopeKey(null);
+  }, [scopeKey, selectedScope]);
 
   // Mirror q upward so the transcript can highlight the same term.
   useEffect(() => {
@@ -154,8 +184,15 @@ export function SearchBar({
         const res = await api.search(
           q.trim(),
           source,
-          scopeProjectId ?? undefined,
-          since
+          source === "all" ? undefined : selectedScope?.projectId,
+          since,
+          undefined,
+          source === "all" && selectedScope
+            ? selectedScope.projects
+                .map(projectScope)
+                .filter((x): x is ProjectSearchScope => x !== null)
+            : undefined,
+          roleFilter
         );
         setHits(res);
       } catch {
@@ -167,7 +204,7 @@ export function SearchBar({
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [q, source, scopeProjectId, timeRange]);
+  }, [q, source, selectedScope, timeRange, roleFilter]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -175,6 +212,7 @@ export function SearchBar({
       if (boxRef.current && !boxRef.current.contains(t)) setOpen(false);
       if (scopeRef.current && !scopeRef.current.contains(t)) setScopeOpen(false);
       if (timeRef.current && !timeRef.current.contains(t)) setTimeOpen(false);
+      if (roleRef.current && !roleRef.current.contains(t)) setRoleOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -218,18 +256,21 @@ export function SearchBar({
   }, [timeRange]);
 
   const scopeLabel = useMemo(() => {
-    if (!scopeProjectId) return "全部";
-    const p = projects.find((x) => x.id === scopeProjectId);
-    if (!p) return scopeProjectId.slice(0, 12);
-    return shortCwd(p.cwd) || p.id.slice(0, 12);
-  }, [scopeProjectId, projects]);
+    if (!selectedScope) return "全部";
+    return selectedScope.label;
+  }, [selectedScope]);
+
+  const roleLabel = useMemo(
+    () => ROLE_OPTIONS.find((x) => x.value === roleFilter)?.label ?? "不限",
+    [roleFilter]
+  );
 
   return (
     <div className="search" ref={boxRef}>
       <div className="search-row">
         <div className="search-scope" ref={scopeRef}>
           <button
-            className={"search-scope-trigger" + (scopeProjectId ? " active" : "")}
+            className={"search-scope-trigger" + (scopeKey ? " active" : "")}
             onClick={() => setScopeOpen((v) => !v)}
             title="搜索范围（按 project 过滤）"
           >
@@ -240,30 +281,30 @@ export function SearchBar({
             <div className="search-scope-menu">
               <button
                 className={
-                  "search-scope-item" + (!scopeProjectId ? " selected" : "")
+                  "search-scope-item" + (!scopeKey ? " selected" : "")
                 }
                 onClick={() => {
-                  setScopeProjectId(null);
+                  setScopeKey(null);
                   setScopeOpen(false);
                 }}
               >
                 全部 project
               </button>
               {projects.length > 0 && <div className="search-scope-divider" />}
-              {projects.map((p) => (
+              {scopeOptions.map((opt) => (
                 <button
-                  key={p.id}
+                  key={opt.key}
                   className={
                     "search-scope-item" +
-                    (scopeProjectId === p.id ? " selected" : "")
+                    (scopeKey === opt.key ? " selected" : "")
                   }
                   onClick={() => {
-                    setScopeProjectId(p.id);
+                    setScopeKey(opt.key);
                     setScopeOpen(false);
                   }}
-                  title={p.cwd}
+                  title={opt.title}
                 >
-                  {shortCwd(p.cwd) || p.id.slice(0, 12)}
+                  {opt.label}
                 </button>
               ))}
             </div>
@@ -359,6 +400,37 @@ export function SearchBar({
             </div>
           )}
         </div>
+        <div className="search-scope search-role" ref={roleRef}>
+          <button
+            className={"search-scope-trigger" + (roleFilter !== "all" ? " active" : "")}
+            onClick={() => setRoleOpen((v) => !v)}
+            title="按发言方过滤"
+          >
+            <RoleIcon role={roleFilter} />
+            <span className="search-scope-label">{roleLabel}</span>
+            <span className="search-scope-caret">▾</span>
+          </button>
+          {roleOpen && (
+            <div className="search-scope-menu search-role-menu">
+              {ROLE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={
+                    "search-scope-item" +
+                    (roleFilter === opt.value ? " selected" : "")
+                  }
+                  onClick={() => {
+                    setRoleFilter(opt.value);
+                    setRoleOpen(false);
+                  }}
+                >
+                  <RoleIcon role={opt.value} />
+                  {opt.menuLabel}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <input
           value={q}
           onFocus={() => setOpen(true)}
@@ -385,7 +457,7 @@ export function SearchBar({
           )}
           {hits.map((h) => (
             <button
-              key={h.projectId + h.sessionId + h.uuid}
+              key={h.projectId + h.sessionId + h.uuid + h.role + h.snippet}
               className="search-hit"
               onClick={() => {
                 onOpenHit(h);
@@ -444,10 +516,137 @@ function ClockIcon() {
   );
 }
 
+function RoleIcon({ role }: { role: SearchRole }) {
+  if (role === "user") {
+    return (
+      <svg className="search-role-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden>
+        <circle
+          cx="12"
+          cy="8"
+          r="3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <path
+          d="M5 20a7 7 0 0 1 14 0"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (role === "assistant") {
+    return (
+      <svg className="search-role-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden>
+        <rect
+          x="5"
+          y="8"
+          width="14"
+          height="10"
+          rx="3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <path
+          d="M12 5v3M9 13h.01M15 13h.01"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg className="search-role-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden>
+      <circle
+        cx="9"
+        cy="8"
+        r="3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <rect
+        x="12"
+        y="11"
+        width="7"
+        height="6"
+        rx="2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M4 19a5 5 0 0 1 8-4M15.5 9v2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function shortCwd(cwd?: string): string {
   if (!cwd) return "";
   const parts = cwd.split(/[\\/]/).filter(Boolean);
   return parts.slice(-2).join("/");
+}
+
+function normalizeCwd(cwd?: string): string {
+  return (cwd ?? "").replace(/[\\/]+/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+function buildScopeOptions(projects: ProjectSummary[], mergeByCwd: boolean): ScopeOption[] {
+  if (!mergeByCwd) {
+    return projects.map((p) => ({
+      key: p.id,
+      label: shortCwd(p.cwd) || p.id.slice(0, 12),
+      title: p.cwd,
+      projectId: p.id,
+      projects: [p],
+    }));
+  }
+
+  const byCwd = new Map<string, ScopeOption>();
+  for (const p of projects) {
+    const cwdKey = normalizeCwd(p.cwd);
+    const key = cwdKey || `${p.source ?? "claude"}:${p.id}`;
+    const existing = byCwd.get(key);
+    if (existing) {
+      existing.projects.push(p);
+      existing.title = scopeTitle(existing.projects);
+      continue;
+    }
+    byCwd.set(key, {
+      key,
+      label: shortCwd(p.cwd) || p.id.slice(0, 12),
+      title: scopeTitle([p]),
+      projects: [p],
+    });
+  }
+  return Array.from(byCwd.values());
+}
+
+function scopeTitle(projects: ProjectSummary[]): string {
+  const cwd = projects[0]?.cwd ?? "";
+  const tools = Array.from(new Set(projects.map((p) => p.source ?? "claude"))).join(", ");
+  return tools ? `${cwd}\n${tools}` : cwd;
+}
+
+function projectScope(p: ProjectSummary): ProjectSearchScope | null {
+  const source = p.source ?? "claude";
+  if (!isToolSource(source)) return null;
+  return { source, projectId: p.id };
+}
+
+function isToolSource(value: string): value is ToolSource {
+  return value === "claude" || value === "cursor" || value === "codex";
 }
 
 function Highlight({ text, query }: { text: string; query: string }) {

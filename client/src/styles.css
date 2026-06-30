@@ -1358,6 +1358,21 @@ body.col-resizing * {
   border-radius: 0;
   max-width: 130px;
 }
+.search-role .search-scope-trigger {
+  border-radius: 0;
+  max-width: 104px;
+}
+.search-role-menu {
+  min-width: 132px;
+}
+.search-role-icon {
+  flex: 0 0 auto;
+  opacity: 0.78;
+}
+.search-scope-trigger.active .search-role-icon,
+.search-scope-item.selected .search-role-icon {
+  opacity: 1;
+}
 .search-time-icon {
   flex: 0 0 auto;
   opacity: 0.75;
@@ -1566,6 +1581,11 @@ body.col-resizing * {
   overflow: hidden;
   text-overflow: ellipsis;
   transition: background 0.1s, border-color 0.1s;
+}
+.search-role-menu .search-scope-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 .search-scope-item:hover {
   background: var(--bg-1);
