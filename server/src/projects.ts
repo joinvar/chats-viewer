@@ -58,6 +58,7 @@ export async function listProjects(): Promise<ProjectSummary[]> {
       cwd: realCwd ?? decodeProjectId(d.name),
       sessionCount,
       lastModified: lastModified ? new Date(lastModified).toISOString() : "",
+      revealPath: dirPath,
     });
   }
   out.sort((a, b) => (b.lastModified || "").localeCompare(a.lastModified || ""));
@@ -99,6 +100,7 @@ export async function summarizeSession(
     sessionId,
     projectId,
     messageCount: 0,
+    revealPath: filePath,
   };
 
   const stream = fs.createReadStream(filePath, { encoding: "utf8" });

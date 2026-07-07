@@ -96,6 +96,8 @@ export interface SessionMeta {
   startedAt?: string;
   endedAt?: string;
   messageCount: number;
+  // Absolute path of the session's backing file, for the reveal button's tooltip.
+  revealPath?: string;
 }
 export interface SessionSummary extends SessionMeta {
   firstUserText?: string;
@@ -114,6 +116,8 @@ export interface ProjectSummary {
   cwd: string;
   sessionCount: number;
   lastModified: string;
+  // Absolute path of the project directory, for the reveal button's tooltip.
+  revealPath?: string;
 }
 export interface SearchHit {
   projectId: string;

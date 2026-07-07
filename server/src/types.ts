@@ -97,6 +97,9 @@ export interface SessionMeta {
   startedAt?: string;
   endedAt?: string;
   messageCount: number;
+  // Absolute path of the session's backing file, for the reveal-in-file-manager
+  // button's tooltip. Undefined only for sources where it can't be resolved.
+  revealPath?: string;
 }
 
 export interface SessionSummary extends SessionMeta {
@@ -121,6 +124,10 @@ export interface ProjectSummary {
   cwd: string;
   sessionCount: number;
   lastModified: string;
+  // Absolute path of the project directory, for the reveal-in-file-manager
+  // button's tooltip. Undefined for sources with no single project directory
+  // (Codex), where the button itself is hidden.
+  revealPath?: string;
 }
 
 export interface SearchHit {

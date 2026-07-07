@@ -88,6 +88,7 @@ export async function listCursorProjects(): Promise<ProjectSummary[]> {
       cwd: decodeCursorProjectId(d.name),
       sessionCount: chats.length,
       lastModified: lastModified ? new Date(lastModified).toISOString() : "",
+      revealPath: transcriptsRoot(d.name),
     });
   }
   out.sort((a, b) => (b.lastModified || "").localeCompare(a.lastModified || ""));
@@ -123,6 +124,7 @@ async function summarizeCursorSession(
     messageCount: 0,
     endedAt,
     startedAt: endedAt,
+    revealPath: filePath,
   };
 
   const stream = fs.createReadStream(filePath, { encoding: "utf8" });

@@ -63,7 +63,7 @@ export function ProjectList(props: {
                   e.stopPropagation();
                   onReveal(p);
                 }}
-                title="在文件管理器中打开该项目目录"
+                title={p.revealPath ?? "在文件管理器中打开该项目目录"}
               >
                 📂
               </button>

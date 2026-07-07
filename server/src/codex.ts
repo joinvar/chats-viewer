@@ -227,6 +227,7 @@ async function summarizeCodexSession(
     startedAt: fileInfo.startedAt,
     endedAt: title?.updatedAt ?? fileInfo.endedAt ?? new Date(fileInfo.mtime).toISOString(),
     messageCount: 0,
+    revealPath: fileInfo.file,
   };
 
   const stream = fs.createReadStream(fileInfo.file, { encoding: "utf8" });

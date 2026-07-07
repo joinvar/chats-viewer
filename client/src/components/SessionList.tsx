@@ -107,7 +107,7 @@ export function SessionList(props: {
                           e.stopPropagation();
                           onReveal(s);
                         }}
-                        title="在文件管理器中打开该会话文件所在目录"
+                        title={s.revealPath ?? "在文件管理器中打开该会话文件所在目录"}
                       >
                         📂
                       </button>
