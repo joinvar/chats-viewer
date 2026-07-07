@@ -13,6 +13,7 @@ export function SessionList(props: {
   dangerMode?: boolean;
   onDelete?: (s: SessionSummary) => void;
   onRename?: (s: SessionSummary, currentTitle: string) => void;
+  onReveal?: (s: SessionSummary) => void;
   source?: Source;
   // Header label — "Sessions" normally, "对话" in the aggregated stream.
   headerLabel?: string;
@@ -28,6 +29,7 @@ export function SessionList(props: {
     dangerMode,
     onDelete,
     onRename,
+    onReveal,
     source,
     headerLabel = "Sessions",
     showTool,
@@ -98,6 +100,18 @@ export function SessionList(props: {
                       </button>
                     )}
                     <CopyResume sessionId={s.sessionId} variant="icon" source={rowSource} />
+                    {onReveal && (
+                      <button
+                        className="reveal-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onReveal(s);
+                        }}
+                        title="在文件管理器中打开该会话文件所在目录"
+                      >
+                        📂
+                      </button>
+                    )}
                     {dangerMode && onDelete && (
                       <button
                         className="delete-btn"

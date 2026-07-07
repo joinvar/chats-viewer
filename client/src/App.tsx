@@ -260,6 +260,26 @@ export default function App() {
     }
   }
 
+  async function handleRevealProject(p: ProjectSummary) {
+    const src = p.source ?? sourceForView(view, activeSource);
+    try {
+      await api.reveal(p.id, undefined, src);
+    } catch (e) {
+      setError(`打开目录失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleRevealSession(s: SessionSummary) {
+    const src = s.source ?? activeSource;
+    const pid = s.projectId ?? projectId;
+    if (!pid) return;
+    try {
+      await api.reveal(pid, s.sessionId, src);
+    } catch (e) {
+      setError(`打开目录失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   async function handleRenameSession(s: SessionSummary, currentTitle: string) {
     const src = s.source ?? activeSource;
     const pid = s.projectId ?? projectId;
@@ -577,6 +597,8 @@ export default function App() {
                 onSelect={selectProject}
                 dangerMode={dangerMode}
                 onDelete={handleDeleteProject}
+                onReveal={handleRevealProject}
+                source={view === "all" ? undefined : view}
               />
             </aside>
             <Splitter onDrag={resizeA} onEnd={persist} />
@@ -595,6 +617,7 @@ export default function App() {
                   dangerMode={dangerMode}
                   onDelete={handleDeleteSession}
                   onRename={handleRenameSession}
+                  onReveal={handleRevealSession}
                   headerLabel="对话"
                   showTool
                 />
@@ -607,6 +630,7 @@ export default function App() {
                   dangerMode={dangerMode}
                   onDelete={handleDeleteSession}
                   onRename={handleRenameSession}
+                  onReveal={handleRevealSession}
                   source={activeSource}
                   showTool={view === "all"}
                 />

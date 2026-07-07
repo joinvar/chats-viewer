@@ -125,4 +125,21 @@ export const api = {
       ),
       { customTitle }
     ),
+  // Opens the local file manager at the folder backing a project (sessionId
+  // omitted) or the specific session file (sessionId set).
+  reveal: async (projectId: string, sessionId: string | undefined, source: Source = "claude") => {
+    const r = await fetch(withSource("/api/reveal", source), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, sessionId }),
+    });
+    if (!r.ok) {
+      let msg = `${r.status} ${r.statusText}`;
+      try {
+        const b = await r.json();
+        if (b?.error) msg = b.error;
+      } catch {}
+      throw new Error(msg);
+    }
+  },
 };

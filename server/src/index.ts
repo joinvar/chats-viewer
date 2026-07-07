@@ -9,6 +9,7 @@ import {
   deleteProject,
   deleteSession,
   renameSession,
+  PROJECTS_ROOT,
 } from "./projects.js";
 import { parseSession } from "./parser.js";
 import {
@@ -25,6 +26,7 @@ import {
   parseCursorSession,
   deleteCursorProject,
   deleteCursorSession,
+  CURSOR_PROJECTS_ROOT,
 } from "./cursor.js";
 import {
   listCodexProjects,
@@ -35,6 +37,7 @@ import {
   deleteCodexSession,
   renameCodexSession,
 } from "./codex.js";
+import { revealInFileManager } from "./reveal.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -87,6 +90,17 @@ function parseProjectScopes(value: unknown): ProjectSearchScope[] | undefined {
 
 function parseSearchRole(value: unknown): SearchRole | undefined {
   return value === "user" || value === "assistant" ? value : undefined;
+}
+
+// Joins `id` under `root` and rejects the result if it escapes the root
+// (e.g. a project id containing "..").
+function resolveWithinRoot(root: string, id: string): string {
+  const resolvedRoot = path.resolve(root);
+  const target = path.resolve(path.join(resolvedRoot, id));
+  if (target !== resolvedRoot && !target.startsWith(resolvedRoot + path.sep)) {
+    throw new Error("invalid path");
+  }
+  return target;
 }
 
 // Aggregated ("all") view: merged, time-sorted listings across all three
@@ -201,6 +215,44 @@ app.patch("/api/sessions/:projectId/:sessionId", async (req, res) => {
       // no separate title index to update.
       throw new Error(`rename not supported for ${src} sessions`);
     }
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message ?? "error" });
+  }
+});
+
+// Opens the local OS file manager at the folder backing a project or session.
+// Local-only, single-user tool — this endpoint shells out to explorer/open/
+// xdg-open, which is fine here but would not be safe to expose beyond localhost.
+app.post("/api/reveal", async (req, res) => {
+  try {
+    const src = pickSource(req);
+    const projectId = String(req.body?.projectId ?? "");
+    const sessionId = req.body?.sessionId ? String(req.body.sessionId) : undefined;
+    if (!projectId) throw new Error("missing projectId");
+
+    let target: string;
+    let isFile: boolean;
+    if (sessionId) {
+      target =
+        src === "cursor"
+          ? cursorSessionFilePath(projectId, sessionId)
+          : src === "codex"
+          ? await codexSessionFilePath(projectId, sessionId)
+          : sessionFilePath(projectId, sessionId);
+      isFile = true;
+    } else if (src === "cursor") {
+      target = path.join(resolveWithinRoot(CURSOR_PROJECTS_ROOT, projectId), "agent-transcripts");
+      isFile = false;
+    } else if (src === "claude") {
+      target = resolveWithinRoot(PROJECTS_ROOT, projectId);
+      isFile = false;
+    } else {
+      throw new Error("Codex 项目没有单一目录，请在具体会话上打开");
+    }
+
+    if (!fs.existsSync(target)) return res.status(404).json({ error: "路径不存在" });
+    await revealInFileManager(target, isFile);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ error: e?.message ?? "error" });

@@ -11,14 +11,28 @@ export function ProjectList(props: {
   onSelect: (p: ProjectSummary) => void;
   dangerMode?: boolean;
   onDelete?: (p: ProjectSummary) => void;
+  onReveal?: (p: ProjectSummary) => void;
+  // Current per-tool view, used when a row doesn't carry its own `source`
+  // (i.e. everywhere except the aggregated view).
+  source?: string;
 }) {
-  const { projects, selectedId, selectedSource, onSelect, dangerMode, onDelete } = props;
+  const {
+    projects,
+    selectedId,
+    selectedSource,
+    onSelect,
+    dangerMode,
+    onDelete,
+    onReveal,
+    source,
+  } = props;
   return (
     <div className="list">
       <div className="list-header">Projects · {projects.length}</div>
       {projects.map((p) => {
         const selected =
           p.id === selectedId && (selectedSource == null || p.source === selectedSource);
+        const rowSource = p.source ?? source;
         return (
           <div
             key={(p.source ?? "") + ":" + p.id}
@@ -42,6 +56,18 @@ export function ProjectList(props: {
                 {p.lastModified && " · " + formatRelative(p.lastModified)}
               </div>
             </div>
+            {onReveal && rowSource !== "codex" && (
+              <button
+                className="reveal-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReveal(p);
+                }}
+                title="在文件管理器中打开该项目目录"
+              >
+                📂
+              </button>
+            )}
             {dangerMode && onDelete && (
               <button
                 className="delete-btn"
