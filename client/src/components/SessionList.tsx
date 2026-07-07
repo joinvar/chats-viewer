@@ -1,6 +1,7 @@
 import type { SessionSummary } from "../types";
 import type { Source } from "../api";
 import { cleanSessionTitle, formatRelative } from "../util";
+import { CopyIconButton } from "./CopyIconButton";
 import { CopyResume } from "./CopyResume";
 import { ToolIcon } from "./ToolIcon";
 
@@ -100,6 +101,13 @@ export function SessionList(props: {
                       </button>
                     )}
                     <CopyResume sessionId={s.sessionId} variant="icon" source={rowSource} />
+                    {s.revealPath && (
+                      <CopyIconButton
+                        text={s.revealPath}
+                        title={`复制会话文件路径\n${s.revealPath}`}
+                        icon="📄"
+                      />
+                    )}
                     {onReveal && (
                       <button
                         className="reveal-btn"
