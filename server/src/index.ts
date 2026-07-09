@@ -37,6 +37,16 @@ import {
   deleteCodexSession,
   renameCodexSession,
 } from "./codex.js";
+import {
+  listGrokProjects,
+  listGrokSessions,
+  grokSessionFilePath,
+  parseGrokSession,
+  deleteGrokProject,
+  deleteGrokSession,
+  renameGrokSession,
+  GROK_SESSIONS_ROOT,
+} from "./grok.js";
 import { revealInFileManager } from "./reveal.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -57,10 +67,13 @@ app.use((req, res, next) => {
   next();
 });
 
-type Source = "claude" | "cursor" | "codex";
+type Source = "claude" | "cursor" | "codex" | "grok";
 function pickSource(req: express.Request): Source {
-  if (req.query.source === "codex") return "codex";
-  return req.query.source === "cursor" ? "cursor" : "claude";
+  const s = req.query.source;
+  if (s === "codex") return "codex";
+  if (s === "cursor") return "cursor";
+  if (s === "grok") return "grok";
+  return "claude";
 }
 
 function parseProjectScopes(value: unknown): ProjectSearchScope[] | undefined {
@@ -78,7 +91,10 @@ function parseProjectScopes(value: unknown): ProjectSearchScope[] | undefined {
     const source = (item as any).source;
     const projectId = (item as any).projectId;
     if (
-      (source === "claude" || source === "cursor" || source === "codex") &&
+      (source === "claude" ||
+        source === "cursor" ||
+        source === "codex" ||
+        source === "grok") &&
       typeof projectId === "string" &&
       projectId
     ) {
@@ -103,10 +119,10 @@ function resolveWithinRoot(root: string, id: string): string {
   return target;
 }
 
-// Aggregated ("all") view: merged, time-sorted listings across all three
-// tools. Each row carries its `source` so the client routes follow-up calls
-// back to the right backend. Declared before the per-tool routes so the static
-// path doesn't get shadowed by `/api/projects/:id/...`.
+// Aggregated ("all") view: merged, time-sorted listings across all tools.
+// Each row carries its `source` so the client routes follow-up calls back to
+// the right backend. Declared before the per-tool routes so the static path
+// doesn't get shadowed by `/api/projects/:id/...`.
 app.get("/api/all/projects", async (_req, res) => {
   try {
     res.json(await listAllProjects());
@@ -131,6 +147,8 @@ app.get("/api/projects", async (req, res) => {
         ? await listCursorProjects()
         : src === "codex"
         ? await listCodexProjects()
+        : src === "grok"
+        ? await listGrokProjects()
         : await listProjects()
     );
   } catch (e: any) {
@@ -146,6 +164,8 @@ app.get("/api/projects/:id/sessions", async (req, res) => {
         ? await listCursorSessions(req.params.id)
         : src === "codex"
         ? await listCodexSessions(req.params.id)
+        : src === "grok"
+        ? await listGrokSessions(req.params.id)
         : await listSessions(req.params.id)
     );
   } catch (e: any) {
@@ -161,6 +181,8 @@ app.get("/api/sessions/:projectId/:sessionId", async (req, res) => {
         ? cursorSessionFilePath(req.params.projectId, req.params.sessionId)
         : src === "codex"
         ? await codexSessionFilePath(req.params.projectId, req.params.sessionId)
+        : src === "grok"
+        ? grokSessionFilePath(req.params.projectId, req.params.sessionId)
         : sessionFilePath(req.params.projectId, req.params.sessionId);
     if (!fs.existsSync(file)) return res.status(404).json({ error: "not found" });
     const t =
@@ -168,6 +190,8 @@ app.get("/api/sessions/:projectId/:sessionId", async (req, res) => {
         ? await parseCursorSession(req.params.projectId, req.params.sessionId, file)
         : src === "codex"
         ? await parseCodexSession(req.params.projectId, req.params.sessionId, file)
+        : src === "grok"
+        ? await parseGrokSession(req.params.projectId, req.params.sessionId, file)
         : await parseSession(req.params.projectId, req.params.sessionId, file);
     const { byUuid: _drop, ...wire } = t;
     res.json(wire);
@@ -181,6 +205,7 @@ app.delete("/api/projects/:id", async (req, res) => {
     const src = pickSource(req);
     if (src === "cursor") await deleteCursorProject(req.params.id);
     else if (src === "codex") await deleteCodexProject(req.params.id);
+    else if (src === "grok") await deleteGrokProject(req.params.id);
     else await deleteProject(req.params.id);
     res.json({ ok: true });
   } catch (e: any) {
@@ -193,6 +218,7 @@ app.delete("/api/sessions/:projectId/:sessionId", async (req, res) => {
     const src = pickSource(req);
     if (src === "cursor") await deleteCursorSession(req.params.projectId, req.params.sessionId);
     else if (src === "codex") await deleteCodexSession(req.params.projectId, req.params.sessionId);
+    else if (src === "grok") await deleteGrokSession(req.params.projectId, req.params.sessionId);
     else await deleteSession(req.params.projectId, req.params.sessionId);
     res.json({ ok: true });
   } catch (e: any) {
@@ -210,6 +236,9 @@ app.patch("/api/sessions/:projectId/:sessionId", async (req, res) => {
       // Codex stores thread names in ~/.codex/session_index.jsonl, not inside
       // the session jsonl files — we can rewrite that index safely.
       await renameCodexSession(req.params.sessionId, title);
+    } else if (src === "grok") {
+      // Grok keeps title in summary.json (same fields /rename writes).
+      await renameGrokSession(req.params.projectId, req.params.sessionId, title);
     } else {
       // Cursor's transcript is a pure event log written by Cursor itself, with
       // no separate title index to update.
@@ -239,6 +268,8 @@ app.post("/api/reveal", async (req, res) => {
           ? cursorSessionFilePath(projectId, sessionId)
           : src === "codex"
           ? await codexSessionFilePath(projectId, sessionId)
+          : src === "grok"
+          ? grokSessionFilePath(projectId, sessionId)
           : sessionFilePath(projectId, sessionId);
       isFile = true;
     } else if (src === "cursor") {
@@ -246,6 +277,9 @@ app.post("/api/reveal", async (req, res) => {
       isFile = false;
     } else if (src === "claude") {
       target = resolveWithinRoot(PROJECTS_ROOT, projectId);
+      isFile = false;
+    } else if (src === "grok") {
+      target = resolveWithinRoot(GROK_SESSIONS_ROOT, projectId);
       isFile = false;
     } else {
       throw new Error("Codex 项目没有单一目录，请在具体会话上打开");

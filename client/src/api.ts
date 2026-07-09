@@ -6,7 +6,7 @@ import type {
   SearchHit,
 } from "./types";
 
-export type Source = "claude" | "cursor" | "codex";
+export type Source = "claude" | "cursor" | "codex" | "grok";
 // The top selector also offers the aggregated cross-tool view.
 export type View = Source | "all";
 export type ProjectSearchScope = { source: Source; projectId: string };

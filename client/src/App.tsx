@@ -40,7 +40,10 @@ function loadSelection(view: View): Selection {
   const m = loadSelectionMap();
   const e = m[view];
   const source =
-    e?.source === "claude" || e?.source === "cursor" || e?.source === "codex"
+    e?.source === "claude" ||
+    e?.source === "cursor" ||
+    e?.source === "codex" ||
+    e?.source === "grok"
       ? e.source
       : undefined;
   return {
@@ -92,7 +95,14 @@ function loadVis(): { projects: boolean; sessions: boolean } {
 function loadView(): View {
   try {
     const s = localStorage.getItem(SOURCE_KEY);
-    if (s === "cursor" || s === "claude" || s === "codex" || s === "all") return s;
+    if (
+      s === "cursor" ||
+      s === "claude" ||
+      s === "codex" ||
+      s === "grok" ||
+      s === "all"
+    )
+      return s;
   } catch {}
   return "claude";
 }
@@ -116,6 +126,7 @@ function loadChromeHidden(): boolean {
 function sourceTitle(source: Source): string {
   if (source === "cursor") return "Cursor";
   if (source === "codex") return "Codex";
+  if (source === "grok") return "Grok";
   return "Claude Code";
 }
 
@@ -239,6 +250,8 @@ export default function App() {
         ? `~/.cursor/projects/${p.id}/agent-transcripts`
         : src === "codex"
         ? `~/.codex/sessions（当前项目匹配的所有 session 文件）`
+        : src === "grok"
+        ? `~/.grok/sessions/${p.id}`
         : `~/.claude/projects/${p.id}`;
     if (!window.confirm(`确认删除项目「${label}」？\n\n该项目下所有 session 都会被删除。`)) {
       return;
@@ -321,6 +334,8 @@ export default function App() {
         ? `~/.cursor/projects/${pid}/agent-transcripts/${s.sessionId}/`
         : src === "codex"
         ? `~/.codex/sessions 中的 Codex session ${s.sessionId}`
+        : src === "grok"
+        ? `~/.grok/sessions/${pid}/${s.sessionId}/`
         : `${s.sessionId}.jsonl`;
     if (!window.confirm(`再次确认：将永久删除 ${pathHint}，无法恢复！\n\n继续？`)) return;
     try {

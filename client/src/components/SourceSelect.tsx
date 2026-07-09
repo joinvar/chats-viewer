@@ -10,6 +10,7 @@ type Option = {
 
 const OPTIONS: Option[] = [
   { value: "all", label: "全部（混合）", icon: <AllToolsIcon /> },
+  { value: "grok", label: "Grok", icon: <ToolIcon source="grok" /> },
   { value: "codex", label: "Codex", icon: <ToolIcon source="codex" /> },
   { value: "claude", label: "Claude Code", icon: <ToolIcon source="claude" /> },
   { value: "cursor", label: "Cursor", icon: <ToolIcon source="cursor" /> },

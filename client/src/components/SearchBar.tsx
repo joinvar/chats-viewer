@@ -445,6 +445,8 @@ export function SearchBar({
               ? "搜索 Cursor 对话…"
               : source === "codex"
               ? "搜索 Codex 对话…"
+              : source === "grok"
+              ? "搜索 Grok 对话…"
               : "搜索 Claude Code 对话…"
           }
         />
@@ -646,7 +648,12 @@ function projectScope(p: ProjectSummary): ProjectSearchScope | null {
 }
 
 function isToolSource(value: string): value is ToolSource {
-  return value === "claude" || value === "cursor" || value === "codex";
+  return (
+    value === "claude" ||
+    value === "cursor" ||
+    value === "codex" ||
+    value === "grok"
+  );
 }
 
 function Highlight({ text, query }: { text: string; query: string }) {

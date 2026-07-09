@@ -2,7 +2,7 @@
   "name": "chats-viewer",
   "private": true,
   "version": "0.1.0",
-  "description": "Local viewer for Claude Code conversation history",
+  "description": "Local viewer for Claude Code / Cursor / Codex / Grok conversation history",
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
     "build": "npm --prefix client run build && npm --prefix server run build",

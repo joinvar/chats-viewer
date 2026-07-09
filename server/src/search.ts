@@ -12,9 +12,10 @@ import {
   listCodexFiles,
   parseCodexSession,
 } from "./codex.js";
+import { listGrokFiles, parseGrokSession } from "./grok.js";
 import type { SearchHit, Entry, ContentBlock } from "./types.js";
 
-export type SearchSource = "claude" | "cursor" | "codex";
+export type SearchSource = "claude" | "cursor" | "codex" | "grok";
 export type SearchRole = "user" | "assistant";
 export interface ProjectSearchScope {
   source: SearchSource;
@@ -52,6 +53,7 @@ const indexes: Record<SearchSource, SourceIndex> = {
   claude: { rows: [], metas: {}, mtimes: {}, lastBuild: 0 },
   cursor: { rows: [], metas: {}, mtimes: {}, lastBuild: 0 },
   codex: { rows: [], metas: {}, mtimes: {}, lastBuild: 0 },
+  grok: { rows: [], metas: {}, mtimes: {}, lastBuild: 0 },
 };
 
 async function claudeEnumerate(): Promise<
@@ -131,6 +133,12 @@ async function codexEnumerate(): Promise<
   }));
 }
 
+async function grokEnumerate(): Promise<
+  Array<{ projectId: string; sessionId: string; file: string; mtime: number }>
+> {
+  return listGrokFiles();
+}
+
 async function ensureIndex(source: SearchSource): Promise<void> {
   const idx = indexes[source];
   const now = Date.now();
@@ -143,6 +151,8 @@ async function ensureIndex(source: SearchSource): Promise<void> {
       ? await cursorEnumerate()
       : source === "codex"
       ? await codexEnumerate()
+      : source === "grok"
+      ? await grokEnumerate()
       : await claudeEnumerate();
   const seen: Record<string, number> = {};
   const toRefresh: Array<{ projectId: string; sessionId: string; file: string }> = [];
@@ -168,6 +178,8 @@ async function ensureIndex(source: SearchSource): Promise<void> {
           ? await parseCursorSession(projectId, sessionId, file)
           : source === "codex"
           ? await parseCodexSession(projectId, sessionId, file)
+          : source === "grok"
+          ? await parseGrokSession(projectId, sessionId, file)
           : await parseSession(projectId, sessionId, file);
       idx.metas[`${projectId}::${sessionId}`] = {
         customTitle: t.meta.customTitle,
@@ -272,7 +284,7 @@ export async function search(
   return hits.slice(0, limit);
 }
 
-// Aggregated search for the "all" view: run all three indexes, tag each hit
+// Aggregated search for the "all" view: run every source index, tag each hit
 // with its source so the client can open it against the right backend, then
 // merge newest-first and cap.
 export async function searchAll(
@@ -288,10 +300,11 @@ export async function searchAll(
     if (!projectScopes) return projectId;
     return projectScopes.filter((s) => s.source === source).map((s) => s.projectId);
   };
-  const [claude, cursor, codex] = await Promise.all([
+  const [claude, cursor, codex, grok] = await Promise.all([
     search(q, limit, "claude", scopedIds("claude"), since, until, role),
     search(q, limit, "cursor", scopedIds("cursor"), since, until, role),
     search(q, limit, "codex", scopedIds("codex"), since, until, role),
+    search(q, limit, "grok", scopedIds("grok"), since, until, role),
   ]);
   const tag = (arr: SearchHit[], source: SearchSource): SearchHit[] =>
     arr.map((h) => ({ ...h, source }));
@@ -299,6 +312,7 @@ export async function searchAll(
     ...tag(claude, "claude"),
     ...tag(cursor, "cursor"),
     ...tag(codex, "codex"),
+    ...tag(grok, "grok"),
   ];
   hits.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
   return hits.slice(0, limit);
