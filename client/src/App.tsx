@@ -753,7 +753,9 @@ export default function App() {
   }
 
   const showProjectsCol = vis.projects && !conversationMode;
-  const showSessionsCol = conversationMode || vis.sessions;
+  // Conversation list is also toggleable in by-conversation mode (it is the
+  // only side column there; Projects is already hidden).
+  const showSessionsCol = vis.sessions;
 
   return (
     <div className={"app" + (chromeHidden ? " chrome-hidden" : "")}>
@@ -792,8 +794,7 @@ export default function App() {
             <button
               className={"toggle" + (vis.sessions ? " on" : "")}
               onClick={() => toggleVis("sessions")}
-              title="Toggle sessions panel"
-              disabled={conversationMode}
+              title={conversationMode ? "显示/隐藏对话列表" : "Toggle sessions panel"}
             >
               ▤ Sessions
             </button>
