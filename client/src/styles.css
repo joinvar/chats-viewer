@@ -459,7 +459,8 @@ body.col-resizing * {
   transition: opacity 0.1s;
   cursor: pointer;
 }
-.list-item:hover .copy-icon {
+.list-item:hover .copy-icon,
+.entry:hover .copy-icon {
   opacity: 1;
 }
 .copy-icon:hover {

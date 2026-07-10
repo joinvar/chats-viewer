@@ -15,6 +15,7 @@ import { ToolUse } from "./ToolUse";
 import { ToolResult } from "./ToolResult";
 import { Thinking } from "./Thinking";
 import { SidechainBlock } from "./Sidechain";
+import { CopyIconButton } from "./CopyIconButton";
 import { useLayoutEffect, useState } from "react";
 import {
   formatTime,
@@ -152,9 +153,19 @@ function EntryHeader({
 }) {
   const label = toolResult ? "Tool Result" : labelFor(entry);
   const roleClass = toolResult ? "role-tool-result" : "role-" + entry.kind;
+  // One-click copy of visible natural-language text for user prompts and
+  // assistant replies (skips tool_result wrappers / pure tool plumbing).
+  const copyText = entryCopyText(entry, toolResult);
+  const copyTitle =
+    entry.kind === "user"
+      ? "复制用户内容"
+      : entry.kind === "assistant"
+      ? "复制助手回复"
+      : "复制内容";
   return (
     <div className="entry-head">
       <span className={"role " + roleClass}>{label}</span>
+      {copyText && <CopyIconButton text={copyText} title={copyTitle} />}
       {entry.timestamp && (
         <span className="ts" title={entry.timestamp}>
           {formatTime(entry.timestamp)}
@@ -165,6 +176,31 @@ function EntryHeader({
       )}
     </div>
   );
+}
+
+/** Visible plain text for copy — text blocks only, no thinking/tools/reminders. */
+function entryCopyText(entry: Entry, toolResult: boolean): string {
+  if (toolResult) return "";
+  if (entry.kind === "user") {
+    const content = (entry as UserEntry).content;
+    if (typeof content === "string") return stripSystemReminders(content);
+    return textBlocksCopyText(content as ContentBlock[]);
+  }
+  if (entry.kind === "assistant") {
+    return textBlocksCopyText((entry as AssistantEntry).content);
+  }
+  return "";
+}
+
+function textBlocksCopyText(blocks: ContentBlock[]): string {
+  const parts: string[] = [];
+  for (const b of blocks) {
+    if (b.type === "text" && b.text) {
+      const t = stripSystemReminders(b.text);
+      if (t) parts.push(t);
+    }
+  }
+  return parts.join("\n\n").trim();
 }
 
 function labelFor(e: Entry): string {
