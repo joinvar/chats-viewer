@@ -4,6 +4,7 @@ import type {
   Transcript,
   Entry,
   SearchHit,
+  PageResult,
 } from "./types";
 
 export type Source = "claude" | "cursor" | "codex" | "grok";
@@ -12,10 +13,20 @@ export type View = Source | "all";
 export type ProjectSearchScope = { source: Source; projectId: string };
 export type SearchRole = "all" | "user" | "assistant";
 
+/** Default page size for progressive list loading (scroll for more). */
+export const LIST_PAGE_SIZE = 40;
+
+export type { PageResult };
+
 function withSource(url: string, source: View): string {
   if (source === "claude") return url; // keep default URLs clean
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}source=${source}`;
+}
+
+function withPage(url: string, offset: number, limit: number): string {
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}offset=${offset}&limit=${limit}`;
 }
 
 async function j<T>(url: string): Promise<T> {
@@ -74,15 +85,39 @@ async function patch(url: string, body: unknown): Promise<void> {
 }
 
 export const api = {
-  projects: (source: Source = "claude") =>
-    j<ProjectSummary[]>(withSource("/api/projects", source)),
-  sessions: (projectId: string, source: Source = "claude") =>
-    j<SessionSummary[]>(
-      withSource(`/api/projects/${encodeURIComponent(projectId)}/sessions`, source)
+  projects: (
+    source: Source = "claude",
+    offset = 0,
+    limit = LIST_PAGE_SIZE
+  ) =>
+    j<PageResult<ProjectSummary>>(
+      withPage(withSource("/api/projects", source), offset, limit)
+    ),
+  sessions: (
+    projectId: string,
+    source: Source = "claude",
+    offset = 0,
+    limit = LIST_PAGE_SIZE
+  ) =>
+    j<PageResult<SessionSummary>>(
+      withPage(
+        withSource(
+          `/api/projects/${encodeURIComponent(projectId)}/sessions`,
+          source
+        ),
+        offset,
+        limit
+      )
     ),
   // Aggregated cross-tool listings. Each row carries its own `source`.
-  allProjects: () => j<ProjectSummary[]>("/api/all/projects"),
-  allSessions: () => j<SessionSummary[]>("/api/all/sessions"),
+  allProjects: (offset = 0, limit = LIST_PAGE_SIZE) =>
+    j<PageResult<ProjectSummary>>(
+      withPage("/api/all/projects", offset, limit)
+    ),
+  allSessions: (offset = 0, limit = LIST_PAGE_SIZE) =>
+    j<PageResult<SessionSummary>>(
+      withPage("/api/all/sessions", offset, limit)
+    ),
   session: loadTranscript,
   search: (
     q: string,

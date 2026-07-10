@@ -198,14 +198,16 @@ export async function listGrokProjects(): Promise<ProjectSummary[]> {
 export async function listGrokSessions(projectId: string): Promise<SessionSummary[]> {
   assertSafeProjectId(projectId);
   const sessions = await listSessionDirs(projectId);
-  const results: SessionSummary[] = [];
-  for (const { sessionId, dir } of sessions) {
-    try {
-      results.push(await summarizeGrokSession(projectId, sessionId, dir));
-    } catch {
-      // skip broken
-    }
-  }
+  const settled = await Promise.all(
+    sessions.map(async ({ sessionId, dir }) => {
+      try {
+        return await summarizeGrokSession(projectId, sessionId, dir);
+      } catch {
+        return null;
+      }
+    })
+  );
+  const results = settled.filter((s): s is SessionSummary => s != null);
   results.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));
   return results;
 }

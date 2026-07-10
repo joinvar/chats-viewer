@@ -119,6 +119,15 @@ export interface ProjectSummary {
   // Absolute path of the project directory, for the reveal button's tooltip.
   revealPath?: string;
 }
+
+/** Paginated list response used by projects / sessions endpoints. */
+export interface PageResult<T> {
+  items: T[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+}
 export interface SearchHit {
   projectId: string;
   sessionId: string;

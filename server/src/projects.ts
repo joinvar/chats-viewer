@@ -194,15 +194,18 @@ export async function listSessions(projectId: string): Promise<SessionSummary[]>
   const dir = path.join(PROJECTS_ROOT, projectId);
   if (!fs.existsSync(dir)) return [];
   const files = (await fs.promises.readdir(dir)).filter((f) => f.endsWith(".jsonl"));
-  const results: SessionSummary[] = [];
-  for (const f of files) {
-    try {
-      const s = await summarizeSession(projectId, path.join(dir, f));
-      results.push(s);
-    } catch (e) {
-      // skip broken files
-    }
-  }
+  // Parallelize per-file summarize — listing hundreds of sessions sequentially
+  // is the main cost of the aggregated "all conversations" view.
+  const settled = await Promise.all(
+    files.map(async (f) => {
+      try {
+        return await summarizeSession(projectId, path.join(dir, f));
+      } catch {
+        return null;
+      }
+    })
+  );
+  const results = settled.filter((s): s is SessionSummary => s != null);
   results.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));
   return results;
 }

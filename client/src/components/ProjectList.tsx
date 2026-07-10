@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { ProjectSummary } from "../types";
 import { formatRelative } from "../util";
 import { ToolIcon } from "./ToolIcon";
@@ -15,6 +16,12 @@ export function ProjectList(props: {
   // Current per-tool view, used when a row doesn't carry its own `source`
   // (i.e. everywhere except the aggregated view).
   source?: string;
+  // Progressive loading.
+  loading?: boolean;
+  totalCount?: number;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   const {
     projects,
@@ -25,10 +32,51 @@ export function ProjectList(props: {
     onDelete,
     onReveal,
     source,
+    loading,
+    totalCount,
+    hasMore,
+    loadingMore,
+    onLoadMore,
   } = props;
+
+  const listRef = useRef<HTMLDivElement>(null);
+  const loadMoreLock = useRef(false);
+
+  useEffect(() => {
+    if (!loadingMore) loadMoreLock.current = false;
+  }, [loadingMore]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || !onLoadMore) return;
+
+    function onScroll() {
+      if (!el || !hasMore || loadingMore || loadMoreLock.current || !onLoadMore) return;
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 160) {
+        loadMoreLock.current = true;
+        onLoadMore();
+      }
+    }
+
+    el.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [onLoadMore, hasMore, loadingMore, projects.length]);
+
+  const shown = totalCount != null ? totalCount : projects.length;
+  const countLabel = shown
+    ? projects.length < shown
+      ? ` · ${projects.length}/${shown}`
+      : ` · ${shown}`
+    : "";
+
   return (
-    <div className="list">
-      <div className="list-header">Projects · {projects.length}</div>
+    <div className="list" ref={listRef}>
+      <div className="list-header">Projects{countLabel}</div>
+      {loading && projects.length === 0 && <div className="hint">Loading…</div>}
+      {!loading && projects.length === 0 && (
+        <div className="hint">No projects</div>
+      )}
       {projects.map((p) => {
         const selected =
           p.id === selectedId && (selectedSource == null || p.source === selectedSource);
@@ -83,6 +131,16 @@ export function ProjectList(props: {
           </div>
         );
       })}
+      {loadingMore && <div className="hint list-load-more">加载更多…</div>}
+      {!loadingMore && hasMore && (
+        <button
+          type="button"
+          className="list-load-more-btn"
+          onClick={() => onLoadMore?.()}
+        >
+          加载更多
+        </button>
+      )}
     </div>
   );
 }

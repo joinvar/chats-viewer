@@ -18,7 +18,12 @@ import {
   type ProjectSearchScope,
   type SearchRole,
 } from "./search.js";
-import { listAllProjects, listAllSessions } from "./all.js";
+import {
+  listAllProjectsPage,
+  listAllSessionsPage,
+  invalidateAllCaches,
+  pageSlice,
+} from "./all.js";
 import {
   listCursorProjects,
   listCursorSessions,
@@ -108,6 +113,16 @@ function parseSearchRole(value: unknown): SearchRole | undefined {
   return value === "user" || value === "assistant" ? value : undefined;
 }
 
+/** Parse limit/offset query params for progressive list loading. */
+function parsePage(req: express.Request): { offset: number; limit: number } {
+  const rawOffset = parseInt(String(req.query.offset ?? "0"), 10);
+  const rawLimit = parseInt(String(req.query.limit ?? "50"), 10);
+  const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : 0;
+  const limit =
+    Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(500, rawLimit) : 50;
+  return { offset, limit };
+}
+
 // Joins `id` under `root` and rejects the result if it escapes the root
 // (e.g. a project id containing "..").
 function resolveWithinRoot(root: string, id: string): string {
@@ -123,17 +138,23 @@ function resolveWithinRoot(root: string, id: string): string {
 // Each row carries its `source` so the client routes follow-up calls back to
 // the right backend. Declared before the per-tool routes so the static path
 // doesn't get shadowed by `/api/projects/:id/...`.
-app.get("/api/all/projects", async (_req, res) => {
+//
+// Accepts ?limit=&offset= for progressive loading. Without them the full list
+// is still returned as a PageResult (limit defaults to 50) — clients that need
+// everything can pass a large limit or page through hasMore.
+app.get("/api/all/projects", async (req, res) => {
   try {
-    res.json(await listAllProjects());
+    const { offset, limit } = parsePage(req);
+    res.json(await listAllProjectsPage(offset, limit));
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }
 });
 
-app.get("/api/all/sessions", async (_req, res) => {
+app.get("/api/all/sessions", async (req, res) => {
   try {
-    res.json(await listAllSessions());
+    const { offset, limit } = parsePage(req);
+    res.json(await listAllSessionsPage(offset, limit));
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }
@@ -142,15 +163,16 @@ app.get("/api/all/sessions", async (_req, res) => {
 app.get("/api/projects", async (req, res) => {
   try {
     const src = pickSource(req);
-    res.json(
+    const { offset, limit } = parsePage(req);
+    const all =
       src === "cursor"
         ? await listCursorProjects()
         : src === "codex"
         ? await listCodexProjects()
         : src === "grok"
         ? await listGrokProjects()
-        : await listProjects()
-    );
+        : await listProjects();
+    res.json(pageSlice(all, offset, limit));
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }
@@ -159,15 +181,16 @@ app.get("/api/projects", async (req, res) => {
 app.get("/api/projects/:id/sessions", async (req, res) => {
   try {
     const src = pickSource(req);
-    res.json(
+    const { offset, limit } = parsePage(req);
+    const all =
       src === "cursor"
         ? await listCursorSessions(req.params.id)
         : src === "codex"
         ? await listCodexSessions(req.params.id)
         : src === "grok"
         ? await listGrokSessions(req.params.id)
-        : await listSessions(req.params.id)
-    );
+        : await listSessions(req.params.id);
+    res.json(pageSlice(all, offset, limit));
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "error" });
   }
@@ -207,6 +230,7 @@ app.delete("/api/projects/:id", async (req, res) => {
     else if (src === "codex") await deleteCodexProject(req.params.id);
     else if (src === "grok") await deleteGrokProject(req.params.id);
     else await deleteProject(req.params.id);
+    invalidateAllCaches();
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ error: e?.message ?? "error" });
@@ -220,6 +244,7 @@ app.delete("/api/sessions/:projectId/:sessionId", async (req, res) => {
     else if (src === "codex") await deleteCodexSession(req.params.projectId, req.params.sessionId);
     else if (src === "grok") await deleteGrokSession(req.params.projectId, req.params.sessionId);
     else await deleteSession(req.params.projectId, req.params.sessionId);
+    invalidateAllCaches();
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ error: e?.message ?? "error" });

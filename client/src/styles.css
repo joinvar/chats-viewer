@@ -245,6 +245,28 @@ body.col-resizing * {
   color: var(--fg-mute);
   border-bottom: 1px solid var(--border-soft);
   font-weight: 500;
+  z-index: 1;
+}
+.list-load-more {
+  text-align: center;
+  padding: 12px 14px;
+}
+.list-load-more-btn {
+  display: block;
+  width: calc(100% - 28px);
+  margin: 8px 14px 14px;
+  padding: 8px 12px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-mute);
+  font-size: 12px;
+  cursor: pointer;
+}
+.list-load-more-btn:hover {
+  color: var(--fg);
+  border-color: var(--fg-mute);
+  background: var(--bg-hover, rgba(0, 0, 0, 0.03));
 }
 .list-item {
   display: block;

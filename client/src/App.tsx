@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { api, type Source, type View } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, LIST_PAGE_SIZE, type Source, type View } from "./api";
 import type { ProjectSummary, SessionSummary, Transcript, SearchHit } from "./types";
 import { ProjectList } from "./components/ProjectList";
 import { SessionList } from "./components/SessionList";
@@ -139,8 +139,17 @@ export default function App() {
     return sourceForView(v, loadSelection(v).source ?? "claude");
   });
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectsTotal, setProjectsTotal] = useState(0);
+  const [projectsHasMore, setProjectsHasMore] = useState(false);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [loadingMoreProjects, setLoadingMoreProjects] = useState(false);
+
   const [allSessions, setAllSessions] = useState<SessionSummary[]>([]);
+  const [allSessionsTotal, setAllSessionsTotal] = useState(0);
+  const [allSessionsHasMore, setAllSessionsHasMore] = useState(false);
   const [loadingAllSessions, setLoadingAllSessions] = useState(false);
+  const [loadingMoreAllSessions, setLoadingMoreAllSessions] = useState(false);
+
   const [projectId, setProjectId] = useState<string | null>(
     () => loadSelection(loadView()).projectId
   );
@@ -148,6 +157,8 @@ export default function App() {
     projectId: string;
     source: Source;
     items: SessionSummary[];
+    total: number;
+    hasMore: boolean;
   } | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(
     () => loadSelection(loadView()).sessionId
@@ -155,10 +166,16 @@ export default function App() {
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [scrollToUuid, setScrollToUuid] = useState<string | null>(null);
   const [loadingSessions, setLoadingSessions] = useState(false);
+  const [loadingMoreSessions, setLoadingMoreSessions] = useState(false);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [refreshingTranscript, setRefreshingTranscript] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Generation tokens so a slow page response can't clobber a newer view.
+  const projectsGen = useRef(0);
+  const allSessionsGen = useRef(0);
+  const sessionsGen = useRef(0);
 
   const [widths, setWidths] = useState(loadWidths);
   const [vis, setVis] = useState(loadVis);
@@ -201,7 +218,11 @@ export default function App() {
     setView(next);
     setActiveSource(nextSource);
     setProjects([]);
+    setProjectsTotal(0);
+    setProjectsHasMore(false);
     setAllSessions([]);
+    setAllSessionsTotal(0);
+    setAllSessionsHasMore(false);
     setProjectId(sel.projectId);
     setSessionsData(null);
     setSessionId(sel.sessionId);
@@ -261,7 +282,13 @@ export default function App() {
     }
     try {
       await api.deleteProject(p.id, src);
-      setProjects((ps) => ps.filter((x) => !(x.id === p.id && (x.source ?? src) === src)));
+      setProjects((ps) => {
+        const next = ps.filter((x) => !(x.id === p.id && (x.source ?? src) === src));
+        if (next.length !== ps.length) {
+          setProjectsTotal((t) => Math.max(0, t - 1));
+        }
+        return next;
+      });
       if (projectId === p.id && activeSource === src) {
         setProjectId(null);
         setSessionId(null);
@@ -340,22 +367,31 @@ export default function App() {
     if (!window.confirm(`再次确认：将永久删除 ${pathHint}，无法恢复！\n\n继续？`)) return;
     try {
       await api.deleteSession(pid, s.sessionId, src);
-      const drop = (list: SessionSummary[]) =>
-        list.filter((x) => !(x.sessionId === s.sessionId && (x.source ?? src) === src));
-      setSessionsData((d) =>
-        d && d.projectId === pid ? { ...d, items: drop(d.items) } : d
-      );
-      setAllSessions((items) => drop(items));
+      const match = (x: SessionSummary) =>
+        x.sessionId === s.sessionId && (x.source ?? src) === src;
+      setSessionsData((d) => {
+        if (!d || d.projectId !== pid) return d;
+        const items = d.items.filter((x) => !match(x));
+        const removed = items.length !== d.items.length ? 1 : 0;
+        return {
+          ...d,
+          items,
+          total: Math.max(0, d.total - removed),
+        };
+      });
+      setAllSessions((items) => {
+        const next = items.filter((x) => !match(x));
+        if (next.length !== items.length) {
+          setAllSessionsTotal((t) => Math.max(0, t - 1));
+        }
+        return next;
+      });
       if (sessionId === s.sessionId && activeSource === src) {
         setSessionId(null);
         setTranscript(null);
       }
-      // Refresh project list so sessionCount stays accurate.
-      if (view === "all") {
-        if (unifiedMode === "project") api.allProjects().then(setProjects).catch(() => {});
-      } else {
-        api.projects(src).then(setProjects).catch(() => {});
-      }
+      // Refresh first page of projects so sessionCount stays accurate.
+      reloadProjectsFirstPage().catch(() => {});
     } catch (e) {
       setError(`删除 session 失败: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -366,48 +402,172 @@ export default function App() {
     sessionsData?.projectId === projectId && sessionsData.source === activeSource
       ? sessionsData.items
       : [];
+  const sessionsTotal =
+    sessionsData?.projectId === projectId && sessionsData.source === activeSource
+      ? sessionsData.total
+      : 0;
+  const sessionsHasMore =
+    sessionsData?.projectId === projectId && sessionsData.source === activeSource
+      ? sessionsData.hasMore
+      : false;
+
+  async function reloadProjectsFirstPage() {
+    const gen = ++projectsGen.current;
+    setLoadingProjects(true);
+    try {
+      const page =
+        view === "all"
+          ? await api.allProjects(0, LIST_PAGE_SIZE)
+          : await api.projects(view, 0, LIST_PAGE_SIZE);
+      if (gen !== projectsGen.current) return;
+      setProjects(page.items);
+      setProjectsTotal(page.total);
+      setProjectsHasMore(page.hasMore);
+    } finally {
+      if (gen === projectsGen.current) setLoadingProjects(false);
+    }
+  }
 
   // Load the projects column for the current view (skip in by-conversation
-  // mode, where the column is hidden).
+  // mode, where the column is hidden). Progressive: first page only.
   useEffect(() => {
     if (conversationMode) {
       setProjects([]);
+      setProjectsTotal(0);
+      setProjectsHasMore(false);
       return;
     }
     let cancelled = false;
-    const p = view === "all" ? api.allProjects() : api.projects(view);
-    p.then((ps) => {
-      if (cancelled) return;
-      setProjects(ps);
-      // Drop a persisted projectId that no longer exists — otherwise the
-      // sessions fetch 404s and the error banner shows on every reload.
-      setProjectId((prev) => {
-        if (!prev) return prev;
-        return ps.some((x) => x.id === prev) ? prev : null;
+    const gen = ++projectsGen.current;
+    setLoadingProjects(true);
+    setProjects([]);
+    setProjectsHasMore(false);
+    const p =
+      view === "all"
+        ? api.allProjects(0, LIST_PAGE_SIZE)
+        : api.projects(view, 0, LIST_PAGE_SIZE);
+    p.then((page) => {
+      if (cancelled || gen !== projectsGen.current) return;
+      setProjects(page.items);
+      setProjectsTotal(page.total);
+      setProjectsHasMore(page.hasMore);
+      // Drop a persisted projectId only when the full list is loaded and the
+      // id is absent — with progressive pages the selected project may simply
+      // not be on page 1 yet.
+      if (!page.hasMore) {
+        setProjectId((prev) => {
+          if (!prev) return prev;
+          return page.items.some((x) => x.id === prev) ? prev : null;
+        });
+      }
+    })
+      .catch((e) => !cancelled && setError(String(e)))
+      .finally(() => {
+        if (!cancelled && gen === projectsGen.current) setLoadingProjects(false);
       });
-    }).catch((e) => !cancelled && setError(String(e)));
     return () => {
       cancelled = true;
     };
-  }, [view, unifiedMode]);
+  }, [view, unifiedMode, conversationMode]);
+
+  const loadMoreProjects = useCallback(() => {
+    if (conversationMode || loadingMoreProjects || !projectsHasMore) return;
+    const gen = projectsGen.current;
+    const offset = projects.length;
+    setLoadingMoreProjects(true);
+    const p =
+      view === "all"
+        ? api.allProjects(offset, LIST_PAGE_SIZE)
+        : api.projects(view as Source, offset, LIST_PAGE_SIZE);
+    p.then((page) => {
+      if (gen !== projectsGen.current) return;
+      setProjects((prev) => {
+        // De-dupe in case of overlapping requests.
+        const seen = new Set(prev.map((x) => (x.source ?? "") + ":" + x.id));
+        const extra = page.items.filter(
+          (x) => !seen.has((x.source ?? "") + ":" + x.id)
+        );
+        return extra.length ? [...prev, ...extra] : prev;
+      });
+      setProjectsTotal(page.total);
+      setProjectsHasMore(page.hasMore);
+    })
+      .catch((e) => setError(String(e)))
+      .finally(() => {
+        if (gen === projectsGen.current) setLoadingMoreProjects(false);
+      });
+  }, [
+    conversationMode,
+    loadingMoreProjects,
+    projectsHasMore,
+    projects.length,
+    view,
+  ]);
 
   // Load the global, time-sorted conversation stream for by-conversation mode.
+  // Progressive: first page only; more arrives on scroll.
   useEffect(() => {
     if (!conversationMode) {
       setAllSessions([]);
+      setAllSessionsTotal(0);
+      setAllSessionsHasMore(false);
       return;
     }
     let cancelled = false;
+    const gen = ++allSessionsGen.current;
     setLoadingAllSessions(true);
+    setAllSessions([]);
+    setAllSessionsHasMore(false);
     api
-      .allSessions()
-      .then((items) => !cancelled && setAllSessions(items))
+      .allSessions(0, LIST_PAGE_SIZE)
+      .then((page) => {
+        if (cancelled || gen !== allSessionsGen.current) return;
+        setAllSessions(page.items);
+        setAllSessionsTotal(page.total);
+        setAllSessionsHasMore(page.hasMore);
+      })
       .catch((e) => !cancelled && setError(String(e)))
-      .finally(() => !cancelled && setLoadingAllSessions(false));
+      .finally(() => {
+        if (!cancelled && gen === allSessionsGen.current) {
+          setLoadingAllSessions(false);
+        }
+      });
     return () => {
       cancelled = true;
     };
-  }, [view, unifiedMode]);
+  }, [view, unifiedMode, conversationMode]);
+
+  const loadMoreAllSessions = useCallback(() => {
+    if (!conversationMode || loadingMoreAllSessions || !allSessionsHasMore) return;
+    const gen = allSessionsGen.current;
+    const offset = allSessions.length;
+    setLoadingMoreAllSessions(true);
+    api
+      .allSessions(offset, LIST_PAGE_SIZE)
+      .then((page) => {
+        if (gen !== allSessionsGen.current) return;
+        setAllSessions((prev) => {
+          const seen = new Set(
+            prev.map((x) => (x.source ?? "") + ":" + x.sessionId)
+          );
+          const extra = page.items.filter(
+            (x) => !seen.has((x.source ?? "") + ":" + x.sessionId)
+          );
+          return extra.length ? [...prev, ...extra] : prev;
+        });
+        setAllSessionsTotal(page.total);
+        setAllSessionsHasMore(page.hasMore);
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => {
+        if (gen === allSessionsGen.current) setLoadingMoreAllSessions(false);
+      });
+  }, [
+    conversationMode,
+    loadingMoreAllSessions,
+    allSessionsHasMore,
+    allSessions.length,
+  ]);
 
   // Persist the current (source, project, session) per view so reload / view
   // switch restores it.
@@ -416,42 +576,108 @@ export default function App() {
   }, [view, activeSource, projectId, sessionId]);
 
   // Load the sessions for the selected project (skip in by-conversation mode).
+  // Progressive: first page only.
   useEffect(() => {
     if (conversationMode) return;
     if (!projectId) return;
     let cancelled = false;
+    const gen = ++sessionsGen.current;
     setLoadingSessions(true);
+    setSessionsData(null);
     const currentSource = activeSource;
+    const currentProjectId = projectId;
     api
-      .sessions(projectId, currentSource)
-      .then((items) => {
-        if (cancelled) return;
-        setSessionsData({ projectId, source: currentSource, items });
+      .sessions(currentProjectId, currentSource, 0, LIST_PAGE_SIZE)
+      .then((page) => {
+        if (cancelled || gen !== sessionsGen.current) return;
+        setSessionsData({
+          projectId: currentProjectId,
+          source: currentSource,
+          items: page.items,
+          total: page.total,
+          hasMore: page.hasMore,
+        });
         // Keep the current sessionId if it exists in the new list (e.g. set by
-        // a search hit). Otherwise auto-pick the first session.
+        // a search hit). If it's not on page 1 but hasMore, keep it — the
+        // transcript can still load by id. Only auto-pick first when nothing
+        // is selected.
         setSessionId((prev) => {
-          if (prev && items.some((s) => s.sessionId === prev)) return prev;
-          return items[0]?.sessionId ?? null;
+          if (prev) {
+            if (page.items.some((s) => s.sessionId === prev)) return prev;
+            // Keep a search/persisted id even if not on the first page.
+            return prev;
+          }
+          return page.items[0]?.sessionId ?? null;
         });
       })
       .catch((e) => !cancelled && setError(String(e)))
-      .finally(() => !cancelled && setLoadingSessions(false));
+      .finally(() => {
+        if (!cancelled && gen === sessionsGen.current) setLoadingSessions(false);
+      });
     return () => {
       cancelled = true;
     };
   }, [projectId, activeSource, conversationMode]);
 
+  const loadMoreSessions = useCallback(() => {
+    if (conversationMode || !projectId) return;
+    if (loadingMoreSessions || !sessionsHasMore) return;
+    if (!sessionsData || sessionsData.projectId !== projectId) return;
+    if (sessionsData.source !== activeSource) return;
+    const gen = sessionsGen.current;
+    const offset = sessionsData.items.length;
+    const currentSource = activeSource;
+    const currentProjectId = projectId;
+    setLoadingMoreSessions(true);
+    api
+      .sessions(currentProjectId, currentSource, offset, LIST_PAGE_SIZE)
+      .then((page) => {
+        if (gen !== sessionsGen.current) return;
+        setSessionsData((prev) => {
+          if (
+            !prev ||
+            prev.projectId !== currentProjectId ||
+            prev.source !== currentSource
+          ) {
+            return prev;
+          }
+          const seen = new Set(prev.items.map((x) => x.sessionId));
+          const extra = page.items.filter((x) => !seen.has(x.sessionId));
+          return {
+            ...prev,
+            items: extra.length ? [...prev.items, ...extra] : prev.items,
+            total: page.total,
+            hasMore: page.hasMore,
+          };
+        });
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => {
+        if (gen === sessionsGen.current) setLoadingMoreSessions(false);
+      });
+  }, [
+    conversationMode,
+    projectId,
+    activeSource,
+    loadingMoreSessions,
+    sessionsHasMore,
+    sessionsData,
+  ]);
+
+  // True once the sessions list for the current (project, source) has arrived
+  // (even if only page 1). Used as a stable gate so load-more does not
+  // re-trigger transcript reloads.
+  const sessionsReady =
+    conversationMode ||
+    (!!sessionsData &&
+      sessionsData.projectId === projectId &&
+      sessionsData.source === activeSource);
+
+  // Load transcript for the current selection. With progressive lists the
+  // selected session may not be on the first page yet — still load by id.
   useEffect(() => {
     if (!projectId || !sessionId) return;
-    // In by-conversation mode the selection is set atomically from one row, so
-    // load straight away. Otherwise wait until the sessions list is the one
-    // that belongs to this (projectId, source) AND contains this sessionId —
-    // this prevents a brief (newProjectId, oldSessionId) 404 during switches.
-    if (!conversationMode) {
-      if (!sessionsData || sessionsData.projectId !== projectId) return;
-      if (sessionsData.source !== activeSource) return;
-      if (!sessionsData.items.some((s) => s.sessionId === sessionId)) return;
-    }
+    if (!sessionsReady) return;
 
     let cancelled = false;
     setLoadingTranscript(true);
@@ -464,7 +690,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, sessionId, activeSource, sessionsData, conversationMode]);
+  }, [projectId, sessionId, activeSource, sessionsReady, conversationMode]);
 
   async function refreshTranscript() {
     if (!projectId || !sessionId) return;
@@ -614,6 +840,11 @@ export default function App() {
                 onDelete={handleDeleteProject}
                 onReveal={handleRevealProject}
                 source={view === "all" ? undefined : view}
+                loading={loadingProjects}
+                totalCount={projectsTotal}
+                hasMore={projectsHasMore}
+                loadingMore={loadingMoreProjects}
+                onLoadMore={loadMoreProjects}
               />
             </aside>
             <Splitter onDrag={resizeA} onEnd={persist} />
@@ -635,6 +866,10 @@ export default function App() {
                   onReveal={handleRevealSession}
                   headerLabel="对话"
                   showTool
+                  totalCount={allSessionsTotal}
+                  hasMore={allSessionsHasMore}
+                  loadingMore={loadingMoreAllSessions}
+                  onLoadMore={loadMoreAllSessions}
                 />
               ) : (
                 <SessionList
@@ -648,6 +883,10 @@ export default function App() {
                   onReveal={handleRevealSession}
                   source={activeSource}
                   showTool={view === "all"}
+                  totalCount={sessionsTotal}
+                  hasMore={sessionsHasMore}
+                  loadingMore={loadingMoreSessions}
+                  onLoadMore={loadMoreSessions}
                 />
               )}
             </aside>

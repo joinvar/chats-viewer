@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { SessionSummary } from "../types";
 import type { Source } from "../api";
 import { cleanSessionTitle, formatRelative } from "../util";
@@ -20,6 +21,11 @@ export function SessionList(props: {
   headerLabel?: string;
   // Show the originating tool icon + project on each row (aggregated view).
   showTool?: boolean;
+  // Progressive loading: total known count + load-more when scrolled near end.
+  totalCount?: number;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   const {
     sessions,
@@ -34,14 +40,54 @@ export function SessionList(props: {
     source,
     headerLabel = "Sessions",
     showTool,
+    totalCount,
+    hasMore,
+    loadingMore,
+    onLoadMore,
   } = props;
+
+  const listRef = useRef<HTMLDivElement>(null);
+  // Guard against scroll storms while a page request is in flight.
+  const loadMoreLock = useRef(false);
+
+  useEffect(() => {
+    if (!loadingMore) loadMoreLock.current = false;
+  }, [loadingMore]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || !onLoadMore) return;
+
+    function onScroll() {
+      if (!el || !hasMore || loadingMore || loadMoreLock.current || !onLoadMore) return;
+      // Trigger a bit before the absolute bottom so the next page feels ready.
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 160) {
+        loadMoreLock.current = true;
+        onLoadMore();
+      }
+    }
+
+    el.addEventListener("scroll", onScroll, { passive: true });
+    // If the first page doesn't fill the viewport, load more until it does
+    // or we run out — otherwise the user has no scrollbar to trigger more.
+    onScroll();
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [onLoadMore, hasMore, loadingMore, sessions.length]);
+
+  const shown = totalCount != null ? totalCount : sessions.length;
+  const countLabel = shown
+    ? sessions.length < shown
+      ? ` · ${sessions.length}/${shown}`
+      : ` · ${shown}`
+    : "";
+
   return (
-    <div className="list">
+    <div className="list" ref={listRef}>
       <div className="list-header">
         {headerLabel}
-        {sessions.length ? " · " + sessions.length : ""}
+        {countLabel}
       </div>
-      {loading && <div className="hint">Loading…</div>}
+      {loading && sessions.length === 0 && <div className="hint">Loading…</div>}
       {!loading && sessions.length === 0 && (
         <div className="hint">No sessions</div>
       )}
@@ -139,9 +185,26 @@ export function SessionList(props: {
           </div>
         );
       })}
+      {loadingMore && <div className="hint list-load-more">加载更多…</div>}
+      {!loadingMore && hasMore && (
+        <button
+          type="button"
+          className="list-load-more-btn"
+          onClick={() => onLoadMore?.()}
+        >
+          加载更多
+        </button>
+      )}
+      {!hasMore && sessions.length > 0 && totalCount != null && totalCount > LIST_HINT_MIN && (
+        <div className="hint list-load-more">已全部加载 · {totalCount}</div>
+      )}
     </div>
   );
 }
+
+// Only show the "fully loaded" footer once the list is large enough that the
+// progressive UI was actually doing work.
+const LIST_HINT_MIN = 40;
 
 function shortCwd(cwd: string): string {
   const parts = cwd.split(/[\\/]/).filter(Boolean);

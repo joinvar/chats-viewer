@@ -115,6 +115,15 @@ export interface Transcript {
   sidechainsByParent: Record<string, string[]>;
 }
 
+/** Paginated list response used by projects / sessions endpoints. */
+export interface PageResult<T> {
+  items: T[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+}
+
 export interface ProjectSummary {
   id: string;
   // Only set in the aggregated ("all") view — project ids can collide across

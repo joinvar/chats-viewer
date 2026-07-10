@@ -201,14 +201,16 @@ export async function listCodexProjects(): Promise<ProjectSummary[]> {
 export async function listCodexSessions(projectId: string): Promise<SessionSummary[]> {
   const titles = await readCodexTitles();
   const files = (await listCodexFiles()).filter((f) => f.projectId === projectId);
-  const results: SessionSummary[] = [];
-  for (const f of files) {
-    try {
-      results.push(await summarizeCodexSession(f, titles[f.sessionId]));
-    } catch {
-      // skip broken files
-    }
-  }
+  const settled = await Promise.all(
+    files.map(async (f) => {
+      try {
+        return await summarizeCodexSession(f, titles[f.sessionId]);
+      } catch {
+        return null;
+      }
+    })
+  );
+  const results = settled.filter((s): s is SessionSummary => s != null);
   results.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));
   return results;
 }

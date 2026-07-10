@@ -97,14 +97,16 @@ export async function listCursorProjects(): Promise<ProjectSummary[]> {
 
 export async function listCursorSessions(projectId: string): Promise<SessionSummary[]> {
   const chats = await listChatFiles(projectId);
-  const results: SessionSummary[] = [];
-  for (const { chatId, file } of chats) {
-    try {
-      results.push(await summarizeCursorSession(projectId, chatId, file));
-    } catch {
-      // skip broken files
-    }
-  }
+  const settled = await Promise.all(
+    chats.map(async ({ chatId, file }) => {
+      try {
+        return await summarizeCursorSession(projectId, chatId, file);
+      } catch {
+        return null;
+      }
+    })
+  );
+  const results = settled.filter((s): s is SessionSummary => s != null);
   results.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));
   return results;
 }
