@@ -145,17 +145,28 @@ async function summarizeCursorSession(
   return summary;
 }
 
+/**
+ * Cursor wraps the real prompt in metadata tags, e.g.
+ *   <timestamp>…</timestamp> <user_query>actual question</user_query>
+ * Prefer the inner <user_query> text; otherwise strip known wrappers.
+ */
+function cleanCursorUserText(raw: string): string {
+  const joined = raw.trim();
+  if (!joined) return "";
+  const queries = [...joined.matchAll(/<user_query>([\s\S]*?)<\/user_query>/g)].map(
+    (m) => m[1].trim()
+  );
+  if (queries.length > 0) return queries.filter(Boolean).join("\n\n");
+  return joined.replace(/<timestamp>[\s\S]*?<\/timestamp>/g, "").trim();
+}
+
 function firstUserText(content: any): string {
   if (!Array.isArray(content)) return "";
   const parts: string[] = [];
   for (const b of content) {
     if (b?.type === "text" && typeof b.text === "string") parts.push(b.text);
   }
-  const joined = parts.join("\n").trim();
-  // user prompts arrive wrapped in <user_query>…</user_query>; strip that
-  // so the session list shows the actual question.
-  const m = joined.match(/<user_query>([\s\S]*?)<\/user_query>/);
-  return (m ? m[1] : joined).trim();
+  return cleanCursorUserText(parts.join("\n"));
 }
 
 export async function parseCursorSession(
@@ -200,7 +211,9 @@ export async function parseCursorSession(
       for (const b of rawContent) {
         if (b?.type === "text" && typeof b.text === "string") textParts.push(b.text);
       }
-      const content = textParts.length > 0 ? textParts.join("\n\n") : "";
+      const content = cleanCursorUserText(
+        textParts.length > 0 ? textParts.join("\n\n") : ""
+      );
       const ue: UserEntry = {
         uuid,
         parentUuid: prevUuid,
