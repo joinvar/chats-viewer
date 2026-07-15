@@ -87,7 +87,7 @@ npm run install:all
   - 消息里的 `<system-reminder>` 会被折叠成小 chip，避免遮挡正文。
   - 右上角 **⎇ Tree** 按钮打开分支树视图：看到完整的父子链和所有 rewind 产生的分支点；点任意节点，把 transcript 切换到从根到该节点的路径；非当前路径上的节点会变暗。
   - 如果某条 assistant 的 `tool_use` 启动过 Agent（sidechain），sub-conversation 会折叠在那条 tool_use 下面。
-  - `Codex` / `Grok` 会显示 `tool_use` / `tool_result` / `thinking`，并支持复制 resume 命令（`codex resume …` / `grok --resume …`）。
+  - `Codex` / `Grok` / `Cursor` 会显示 `tool_use` / `tool_result` / `thinking`，并支持复制 resume 命令（`codex resume …` / `agent --resume=…` / `cursor-agent --resume=…`）。
 
 - **顶部搜索框**  
   跨所有项目的所有 session 做子串匹配（大小写无关）。匹配 user/assistant 正文和 thinking，不匹配 metadata。点搜索结果会跳到对应 session 并滚动到命中位置（高亮一下）。首次搜索会走全量索引，稍慢；之后按文件 mtime 增量更新。

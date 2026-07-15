@@ -15,9 +15,9 @@ export function CopyResume(props: {
       : source === "codex"
       ? `codex resume ${sessionId}`
       : source === "cursor"
-      ? `agent --resume=${sessionId}`
+      ? `cursor-agent --resume=${sessionId}`
       : source === "grok"
-      ? `grok --resume ${sessionId}`
+      ? `agent --resume=${sessionId}`
       : null;
 
   if (!command) return null;
