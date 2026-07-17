@@ -19,6 +19,68 @@ const ROLE_OPTIONS: Array<{ value: SearchRole; label: string; menuLabel: string 
   { value: "assistant", label: "Agent", menuLabel: "只看 Agent" },
 ];
 
+// How the result list is arranged. Purely client-side grouping of the same hits.
+type SearchGroupMode = "hit" | "session" | "project";
+const GROUP_MODE_KEY = "chats-viewer:search-group-mode";
+const GROUP_MODE_OPTIONS: Array<{ value: SearchGroupMode; label: string; title: string }> = [
+  { value: "hit", label: "匹配", title: "按每条命中平铺" },
+  { value: "session", label: "对话", title: "按对话分组" },
+  { value: "project", label: "项目", title: "按项目 → 对话 分级" },
+];
+
+function loadGroupMode(): SearchGroupMode {
+  try {
+    const s = localStorage.getItem(GROUP_MODE_KEY);
+    if (s === "hit" || s === "session" || s === "project") return s;
+  } catch {}
+  return "hit";
+}
+
+function saveGroupMode(mode: SearchGroupMode) {
+  try {
+    localStorage.setItem(GROUP_MODE_KEY, mode);
+  } catch {}
+}
+
+// Recent search queries (newest first). Shared across sources — the term is
+// what users retype, not the result set.
+const HISTORY_KEY = "chats-viewer:search-history";
+const MAX_HISTORY = 10;
+
+function loadHistory(): string[] {
+  try {
+    const s = localStorage.getItem(HISTORY_KEY);
+    if (!s) return [];
+    const a = JSON.parse(s);
+    if (!Array.isArray(a)) return [];
+    return a
+      .filter((x): x is string => typeof x === "string" && x.trim().length >= 2)
+      .map((x) => x.trim())
+      .slice(0, MAX_HISTORY);
+  } catch {
+    return [];
+  }
+}
+
+function persistHistory(items: string[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, MAX_HISTORY)));
+  } catch {}
+}
+
+/** Move `q` to the front; case-insensitive de-dupe. */
+function pushHistory(q: string, prev: string[]): string[] {
+  const t = q.trim();
+  if (t.length < 2) return prev;
+  const lower = t.toLowerCase();
+  const next = [t, ...prev.filter((x) => x.toLowerCase() !== lower)].slice(
+    0,
+    MAX_HISTORY
+  );
+  persistHistory(next);
+  return next;
+}
+
 function presetKey(hours: number): string {
   return "h" + hours;
 }
@@ -135,6 +197,10 @@ export function SearchBar({
   const [timeOpen, setTimeOpen] = useState(false);
   const [roleFilter, setRoleFilter] = useState<SearchRole>("all");
   const [roleOpen, setRoleOpen] = useState(false);
+  const [groupMode, setGroupMode] = useState<SearchGroupMode>(loadGroupMode);
+  // Keys of collapsed project/session groups in the preview tree.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [history, setHistory] = useState<string[]>(loadHistory);
   const timer = useRef<number | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const scopeRef = useRef<HTMLDivElement | null>(null);
@@ -175,6 +241,15 @@ export function SearchBar({
       setHits([]);
       return;
     }
+    // Drop roles that no longer match immediately so a slow in-flight
+    // "不限" request can't keep showing Agent hits after the user picks User.
+    if (roleFilter !== "all") {
+      setHits((prev) => prev.filter((h) => h.role === roleFilter));
+    }
+    // Ignore stale responses: changing role/time/scope/q cancels the previous
+    // effect, but an already-in-flight fetch still resolves — without this
+    // flag the older (often unfiltered) payload would overwrite the newer one.
+    let cancelled = false;
     timer.current = window.setTimeout(async () => {
       setLoading(true);
       try {
@@ -194,14 +269,19 @@ export function SearchBar({
             : undefined,
           roleFilter
         );
+        if (cancelled) return;
         setHits(res);
+        // Record the query once a search actually ran (debounce fired).
+        setHistory((prev) => pushHistory(q.trim(), prev));
       } catch {
+        if (cancelled) return;
         setHits([]);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }, 250);
     return () => {
+      cancelled = true;
       if (timer.current) window.clearTimeout(timer.current);
     };
   }, [q, source, selectedScope, timeRange, roleFilter]);
@@ -264,6 +344,68 @@ export function SearchBar({
     () => ROLE_OPTIONS.find((x) => x.value === roleFilter)?.label ?? "不限",
     [roleFilter]
   );
+
+  const sessionGroups = useMemo(
+    () => (groupMode === "hit" ? [] : groupHitsBySession(hits)),
+    [hits, groupMode]
+  );
+  const projectGroups = useMemo(
+    () => (groupMode === "project" ? groupSessionsByProject(sessionGroups) : []),
+    [sessionGroups, groupMode]
+  );
+
+  function selectGroupMode(mode: SearchGroupMode) {
+    setGroupMode(mode);
+    saveGroupMode(mode);
+    setCollapsed(new Set()); // expand all when switching layout
+  }
+
+  function toggleCollapsed(key: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function openHit(h: SearchHit) {
+    onOpenHit(h);
+    setOpen(false);
+  }
+
+  function applyHistoryQuery(term: string) {
+    setQ(term);
+    setOpen(true);
+    setHistory((prev) => pushHistory(term, prev));
+  }
+
+  function removeHistoryItem(term: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    setHistory((prev) => {
+      const next = prev.filter((x) => x !== term);
+      persistHistory(next);
+      return next;
+    });
+  }
+
+  function clearHistory() {
+    setHistory([]);
+    persistHistory([]);
+  }
+
+  // When the box is open and the query is too short to search, surface
+  // recent terms so the user can re-run without retyping.
+  const showHistory = open && q.trim().length < 2 && history.length > 0;
+  // Optional: while typing, also list history entries that contain the query
+  // (helps discover past longer phrases).
+  const historySuggestions = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (t.length < 2) return [];
+    return history.filter(
+      (h) => h.toLowerCase().includes(t) && h.toLowerCase() !== t
+    );
+  }, [q, history]);
 
   return (
     <div className="search" ref={boxRef}>
@@ -438,6 +580,12 @@ export function SearchBar({
             setQ(e.target.value);
             setOpen(true);
           }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setOpen(false);
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
           placeholder={
             source === "all"
               ? "搜索全部工具对话…"
@@ -451,41 +599,396 @@ export function SearchBar({
           }
         />
       </div>
-      {open && q.trim().length >= 2 && (
-        <div className="search-results">
-          {loading && <div className="hint">Searching…</div>}
-          {!loading && hits.length === 0 && (
-            <div className="hint">No matches</div>
-          )}
-          {hits.map((h) => (
+      {showHistory && (
+        <div className="search-results search-history">
+          <div className="search-results-bar">
+            <span className="search-results-count">最近搜索</span>
             <button
-              key={h.projectId + h.sessionId + h.uuid + h.role + h.snippet}
-              className="search-hit"
-              onClick={() => {
-                onOpenHit(h);
-                setOpen(false);
-              }}
+              type="button"
+              className="search-history-clear"
+              onClick={clearHistory}
+              title="清空最近搜索"
             >
-              <div className="hit-title">
-                {h.source && (
-                  <span className="hit-tool-icon" title={h.source}>
-                    <ToolIcon source={h.source} size={13} />
-                  </span>
-                )}
-                {h.customTitle || shortCwd(h.cwd) || h.sessionId.slice(0, 8)}
-                <span className="hit-role">{h.role}</span>
-                {h.timestamp && (
-                  <span className="hit-time">{formatRelative(h.timestamp)}</span>
-                )}
-              </div>
-              <div className="hit-snippet">
-                <Highlight text={h.snippet} query={q.trim()} />
-              </div>
+              清空
             </button>
+          </div>
+          {history.map((term) => (
+            <div key={term} className="search-history-row">
+              <button
+                type="button"
+                className="search-history-item"
+                onClick={() => applyHistoryQuery(term)}
+              >
+                <HistoryIcon />
+                <span className="search-history-term">{term}</span>
+              </button>
+              <button
+                type="button"
+                className="search-history-del"
+                title="从历史中移除"
+                onClick={(e) => removeHistoryItem(term, e)}
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
       )}
+      {open && q.trim().length >= 2 && (
+        <div className="search-results">
+          <div className="search-results-bar">
+            <span className="search-results-count">
+              {loading
+                ? "Searching…"
+                : hits.length === 0
+                ? "No matches"
+                : groupMode === "hit"
+                ? `${hits.length} 条匹配`
+                : groupMode === "session"
+                ? `${sessionGroups.length} 个对话 · ${hits.length} 条`
+                : `${projectGroups.length} 个项目 · ${sessionGroups.length} 对话 · ${hits.length} 条`}
+            </span>
+            <div className="search-group-toggle" role="group" aria-label="结果分组">
+              {GROUP_MODE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={
+                    "search-group-btn" + (groupMode === opt.value ? " active" : "")
+                  }
+                  title={opt.title}
+                  onClick={() => selectGroupMode(opt.value)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {historySuggestions.length > 0 && (
+            <div className="search-history-suggest">
+              {historySuggestions.slice(0, 5).map((term) => (
+                <button
+                  key={term}
+                  type="button"
+                  className="search-history-chip"
+                  onClick={() => applyHistoryQuery(term)}
+                  title={term}
+                >
+                  <HistoryIcon />
+                  {term}
+                </button>
+              ))}
+            </div>
+          )}
+          {loading && hits.length === 0 && <div className="hint">Searching…</div>}
+          {!loading && hits.length === 0 && (
+            <div className="hint">No matches</div>
+          )}
+          {hits.length > 0 && groupMode === "hit" &&
+            hits.map((h) => (
+              <HitRow
+                key={hitKey(h)}
+                hit={h}
+                query={q.trim()}
+                showSessionTitle
+                onOpen={openHit}
+              />
+            ))}
+          {hits.length > 0 && groupMode === "session" &&
+            sessionGroups.map((g) => (
+              <SessionGroupBlock
+                key={g.key}
+                group={g}
+                query={q.trim()}
+                collapsed={collapsed.has(g.key)}
+                onToggle={() => toggleCollapsed(g.key)}
+                onOpenHit={openHit}
+                showProjectHint
+              />
+            ))}
+          {hits.length > 0 && groupMode === "project" &&
+            projectGroups.map((pg) => {
+              const expanded = !collapsed.has(pg.key);
+              return (
+                <div key={pg.key} className="search-group search-group-project">
+                  <button
+                    type="button"
+                    className="search-group-header"
+                    onClick={() => toggleCollapsed(pg.key)}
+                    title={pg.cwd || pg.projectId}
+                  >
+                    <span className="search-group-caret">{expanded ? "▾" : "▸"}</span>
+                    {pg.source && (
+                      <span className="hit-tool-icon" title={pg.source}>
+                        <ToolIcon source={pg.source} size={13} />
+                      </span>
+                    )}
+                    <span className="search-group-title">{pg.label}</span>
+                    <span className="search-group-meta">
+                      {pg.sessions.length} 对话 · {pg.hitCount}
+                    </span>
+                    {pg.latestTs && (
+                      <span className="hit-time">{formatRelative(pg.latestTs)}</span>
+                    )}
+                  </button>
+                  {expanded &&
+                    pg.sessions.map((sg) => (
+                      <SessionGroupBlock
+                        key={sg.key}
+                        group={sg}
+                        query={q.trim()}
+                        collapsed={collapsed.has(sg.key)}
+                        onToggle={() => toggleCollapsed(sg.key)}
+                        onOpenHit={openHit}
+                        nested
+                      />
+                    ))}
+                </div>
+              );
+            })}
+        </div>
+      )}
     </div>
+  );
+}
+
+function hitKey(h: SearchHit): string {
+  return `${h.source ?? ""}:${h.projectId}:${h.sessionId}:${h.uuid}:${h.role}:${h.snippet}`;
+}
+
+interface SessionGroup {
+  key: string;
+  projectId: string;
+  sessionId: string;
+  source?: ToolSource;
+  title: string;
+  cwd?: string;
+  latestTs: string;
+  hits: SearchHit[];
+}
+
+interface ProjectGroup {
+  key: string;
+  projectId: string;
+  source?: ToolSource;
+  label: string;
+  cwd?: string;
+  latestTs: string;
+  sessions: SessionGroup[];
+  hitCount: number;
+}
+
+function groupHitsBySession(hits: SearchHit[]): SessionGroup[] {
+  const map = new Map<string, SessionGroup>();
+  const order: string[] = [];
+  for (const h of hits) {
+    const key = `${h.source ?? "claude"}::${h.projectId}::${h.sessionId}`;
+    let g = map.get(key);
+    if (!g) {
+      g = {
+        key,
+        projectId: h.projectId,
+        sessionId: h.sessionId,
+        source: h.source,
+        title: h.customTitle || h.sessionId.slice(0, 8),
+        cwd: h.cwd,
+        latestTs: h.timestamp || "",
+        hits: [],
+      };
+      map.set(key, g);
+      order.push(key);
+    }
+    g.hits.push(h);
+    if (h.customTitle) g.title = h.customTitle;
+    if ((h.timestamp || "") > g.latestTs) g.latestTs = h.timestamp || "";
+  }
+  // Preserve first-seen order (hits are newest-first from the API).
+  return order.map((k) => map.get(k)!);
+}
+
+function groupSessionsByProject(sessions: SessionGroup[]): ProjectGroup[] {
+  const map = new Map<string, ProjectGroup>();
+  const order: string[] = [];
+  for (const s of sessions) {
+    const key = `${s.source ?? "claude"}::${s.projectId}`;
+    let g = map.get(key);
+    if (!g) {
+      g = {
+        key,
+        projectId: s.projectId,
+        source: s.source,
+        label: shortCwd(s.cwd) || s.projectId.slice(0, 12),
+        cwd: s.cwd,
+        latestTs: s.latestTs,
+        sessions: [],
+        hitCount: 0,
+      };
+      map.set(key, g);
+      order.push(key);
+    }
+    g.sessions.push(s);
+    g.hitCount += s.hits.length;
+    if ((s.latestTs || "") > g.latestTs) g.latestTs = s.latestTs;
+    if (s.cwd) g.cwd = s.cwd;
+  }
+  return order.map((k) => map.get(k)!);
+}
+
+function HitRow({
+  hit,
+  query,
+  showSessionTitle,
+  onOpen,
+  nested,
+}: {
+  hit: SearchHit;
+  query: string;
+  showSessionTitle?: boolean;
+  onOpen: (h: SearchHit) => void;
+  nested?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={"search-hit" + (nested ? " search-hit-nested" : "")}
+      onClick={() => onOpen(hit)}
+    >
+      <div className="hit-title">
+        {showSessionTitle && hit.source && (
+          <span className="hit-tool-icon" title={hit.source}>
+            <ToolIcon source={hit.source} size={13} />
+          </span>
+        )}
+        {showSessionTitle && (
+          <span className="hit-session-label">
+            {hit.customTitle || shortCwd(hit.cwd) || hit.sessionId.slice(0, 8)}
+          </span>
+        )}
+        <HitRoleBadge role={hit.role} />
+        {hit.timestamp && (
+          <span className="hit-time">{formatRelative(hit.timestamp)}</span>
+        )}
+      </div>
+      <div className="hit-snippet">
+        <Highlight text={hit.snippet} query={query} />
+      </div>
+    </button>
+  );
+}
+
+function SessionGroupBlock({
+  group,
+  query,
+  collapsed,
+  onToggle,
+  onOpenHit,
+  nested,
+  showProjectHint,
+}: {
+  group: SessionGroup;
+  query: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  onOpenHit: (h: SearchHit) => void;
+  nested?: boolean;
+  showProjectHint?: boolean;
+}) {
+  const open = !collapsed;
+  return (
+    <div
+      className={
+        "search-group search-group-session" + (nested ? " search-group-nested" : "")
+      }
+    >
+      <div className="search-group-header-row">
+        <button
+          type="button"
+          className="search-group-header"
+          onClick={onToggle}
+          title={group.cwd ? `${group.title}\n${group.cwd}` : group.title}
+        >
+          <span className="search-group-caret">{open ? "▾" : "▸"}</span>
+          {!nested && group.source && (
+            <span className="hit-tool-icon" title={group.source}>
+              <ToolIcon source={group.source} size={13} />
+            </span>
+          )}
+          <span className="search-group-title">{group.title}</span>
+          {showProjectHint && group.cwd && (
+            <span className="search-group-sub">{shortCwd(group.cwd)}</span>
+          )}
+          <span className="search-group-meta">{group.hits.length}</span>
+          {group.latestTs && (
+            <span className="hit-time">{formatRelative(group.latestTs)}</span>
+          )}
+        </button>
+        <button
+          type="button"
+          className="search-group-open"
+          title="打开该对话（跳到最新命中）"
+          onClick={() => onOpenHit(group.hits[0])}
+        >
+          打开
+        </button>
+      </div>
+      {open &&
+        group.hits.map((h) => (
+          <HitRow
+            key={hitKey(h)}
+            hit={h}
+            query={query}
+            onOpen={onOpenHit}
+            nested
+          />
+        ))}
+    </div>
+  );
+}
+
+/** Map index roles to a short User / AI chip for the search preview. */
+function hitRoleMeta(role: string): { label: string; kind: "user" | "ai" | "tool" | "other" } {
+  if (role === "user") return { label: "User", kind: "user" };
+  // assistant text + thinking both come from the model side
+  if (role === "assistant" || role === "thinking") return { label: "AI", kind: "ai" };
+  if (role === "tool result") return { label: "Tool", kind: "tool" };
+  return { label: role || "?", kind: "other" };
+}
+
+function HitRoleBadge({ role }: { role: string }) {
+  const { label, kind } = hitRoleMeta(role);
+  return (
+    <span className={"hit-role hit-role-" + kind} title={role}>
+      {label}
+    </span>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg
+      className="search-history-icon"
+      viewBox="0 0 24 24"
+      width="12"
+      height="12"
+      aria-hidden
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r="8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M12 8v4l2.5 1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
