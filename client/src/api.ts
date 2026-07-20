@@ -29,9 +29,32 @@ function withPage(url: string, offset: number, limit: number): string {
   return `${url}${sep}offset=${offset}&limit=${limit}`;
 }
 
+/** HTTP error with status so callers can distinguish 404 (stale selection) etc. */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function isNotFoundError(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404;
+}
+
 async function j<T>(url: string): Promise<T> {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  if (!r.ok) {
+    let msg = `${r.status} ${r.statusText}`;
+    try {
+      const body = await r.json();
+      if (body?.error) msg = String(body.error);
+    } catch {
+      // keep statusText
+    }
+    throw new ApiError(r.status, msg);
+  }
   return r.json() as Promise<T>;
 }
 

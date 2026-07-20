@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, LIST_PAGE_SIZE, type Source, type View } from "./api";
+import { api, isNotFoundError, LIST_PAGE_SIZE, type Source, type View } from "./api";
 import type { ProjectSummary, SessionSummary, Transcript, SearchHit } from "./types";
 import { ProjectList } from "./components/ProjectList";
 import { SessionList } from "./components/SessionList";
@@ -673,6 +673,25 @@ export default function App() {
       sessionsData.projectId === projectId &&
       sessionsData.source === activeSource);
 
+  // Drop a selection that no longer exists on disk (common after cleaning empty
+  // sessions, or when localStorage still points at a deleted id). Clear quietly
+  // so a refresh doesn't leave a permanent red "404 Not Found" banner.
+  function clearStaleSelection() {
+    setSessionId(null);
+    setTranscript(null);
+    if (conversationMode) {
+      // In by-conversation mode the projectId is only meaningful with a session.
+      setProjectId(null);
+    }
+    // Persist the cleared selection immediately so the next reload doesn't
+    // re-fetch the same missing file.
+    saveSelection(view, {
+      source: activeSource,
+      projectId: conversationMode ? null : projectId,
+      sessionId: null,
+    });
+  }
+
   // Load transcript for the current selection. With progressive lists the
   // selected session may not be on the first page yet — still load by id.
   useEffect(() => {
@@ -685,11 +704,21 @@ export default function App() {
     api
       .session(projectId, sessionId, activeSource)
       .then((t) => !cancelled && setTranscript(t))
-      .catch((e) => !cancelled && setError(String(e)))
+      .catch((e) => {
+        if (cancelled) return;
+        if (isNotFoundError(e)) {
+          clearStaleSelection();
+          return;
+        }
+        setError(String(e));
+      })
       .finally(() => !cancelled && setLoadingTranscript(false));
     return () => {
       cancelled = true;
     };
+    // clearStaleSelection closes over latest view/projectId; effect deps already
+    // cover the values that gate the fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, sessionId, activeSource, sessionsReady, conversationMode]);
 
   async function refreshTranscript() {
@@ -712,6 +741,10 @@ export default function App() {
       }
       setTranscript(t);
     } catch (e) {
+      if (isNotFoundError(e)) {
+        clearStaleSelection();
+        return;
+      }
       setError(`刷新失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setRefreshingTranscript(false);
