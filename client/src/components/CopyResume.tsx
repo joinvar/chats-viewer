@@ -11,13 +11,13 @@ export function CopyResume(props: {
   const [copied, setCopied] = useState(false);
   const command =
     source === "claude"
-      ? `claude --resume ${sessionId}`
+      ? `claude --resume ${sessionId} --dangerously-skip-permissions`
       : source === "codex"
-      ? `codex resume ${sessionId}`
+      ? `codex resume ${sessionId} --dangerously-bypass-approvals-and-sandbox`
       : source === "cursor"
-      ? `cursor-agent --resume=${sessionId}`
+      ? `cursor-agent --resume=${sessionId} --yolo`
       : source === "grok"
-      ? `agent --resume=${sessionId}`
+      ? `agent --resume=${sessionId} --permission-mode bypassPermissions`
       : null;
 
   if (!command) return null;
