@@ -40,6 +40,11 @@ export async function parseSession(
   };
   const entries: Entry[] = [];
   const byUuid: Record<string, Entry> = {};
+  // uuid → parentUuid for lines we drop (turn_duration, permission-mode, …).
+  // Claude Code still parents later messages to those dropped rows, so we
+  // re-link through this map or the next user prompt becomes a second root
+  // and the tree/path walk breaks.
+  const skippedParent: Record<string, string | null> = {};
 
   const stream = fs.createReadStream(filePath, { encoding: "utf8" });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -62,11 +67,20 @@ export async function parseSession(
     if (o.type === "agent-color" && o.agentColor) meta.agentColor = o.agentColor;
     if (o.type === "last-prompt" && o.lastPrompt) meta.lastPrompt = o.lastPrompt;
 
-    if (SKIP_TYPES.has(o.type)) continue;
-    if (o.type === "system" && SKIP_SYSTEM_SUBTYPES.has(o.subtype)) continue;
+    if (SKIP_TYPES.has(o.type)) {
+      noteSkippedParent(skippedParent, o);
+      continue;
+    }
+    if (o.type === "system" && SKIP_SYSTEM_SUBTYPES.has(o.subtype)) {
+      noteSkippedParent(skippedParent, o);
+      continue;
+    }
 
     const entry = toEntry(o);
-    if (!entry) continue;
+    if (!entry) {
+      noteSkippedParent(skippedParent, o);
+      continue;
+    }
 
     entries.push(entry);
     byUuid[entry.uuid] = entry;
@@ -87,6 +101,7 @@ export async function parseSession(
   const sidechainsByParent: Record<string, string[]> = {};
 
   for (const e of entries) {
+    e.parentUuid = resolveKeptParent(e.parentUuid, byUuid, skippedParent);
     if (e.isSidechain) {
       // group sidechain roots under their host tool_use id when possible,
       // else under the nearest non-sidechain parent.
@@ -159,6 +174,28 @@ function toEntry(o: any): Entry | null {
     return e;
   }
   return null;
+}
+
+function noteSkippedParent(
+  skippedParent: Record<string, string | null>,
+  o: { uuid?: string; parentUuid?: string | null }
+): void {
+  if (o?.uuid) skippedParent[o.uuid] = o.parentUuid ?? null;
+}
+
+function resolveKeptParent(
+  parentUuid: string | null,
+  byUuid: Record<string, Entry>,
+  skippedParent: Record<string, string | null>
+): string | null {
+  let cur = parentUuid;
+  const seen = new Set<string>();
+  while (cur && !byUuid[cur]) {
+    if (seen.has(cur)) return null;
+    seen.add(cur);
+    cur = skippedParent[cur] ?? null;
+  }
+  return cur && byUuid[cur] ? cur : null;
 }
 
 function findSidechainHost(e: Entry, byUuid: Record<string, Entry>): string | null {

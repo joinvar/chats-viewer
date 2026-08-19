@@ -1,6 +1,10 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { Transcript, Entry, ContentBlock } from "../types";
-import { isToolResultEntry } from "../util";
+import {
+  cleanSessionTitle,
+  hasMeaningfulTitle,
+  isToolResultEntry,
+} from "../util";
 import { isPureToolEntry } from "./Entry";
 
 export function TreeView(props: {
@@ -29,7 +33,6 @@ export function TreeView(props: {
   function Row({ uuid, isBranchPoint }: { uuid: string; isBranchPoint: boolean }) {
     const e = byUuid[uuid];
     if (!e) return null;
-    const kids = childrenOf[uuid] ?? [];
     const onPath = pathSet.has(uuid);
     const selected = uuid === highlightUuid;
     const tracking = uuid === trackedUuid;
@@ -53,7 +56,9 @@ export function TreeView(props: {
           aria-hidden
         />
         <span className="preview">{previewOf(e)}</span>
-        {isBranchPoint && <span className="branch-badge">⎇{kids.length}</span>}
+        {isBranchPoint && (
+          <span className="branch-badge">⎇{spineChildCount(uuid, childrenOf, byUuid)}</span>
+        )}
       </button>
     );
   }
@@ -96,15 +101,17 @@ export function TreeView(props: {
   }
 
   // Render a node plus its subtree, collapsing linear chains into the same
-  // column. Only emits a .tn-children container at real branch points (> 1
-  // child). Everything between two real user messages — the assistant's
-  // replies and their tool/system steps — collapses into a single
-  // AgentGroupNode so the tree reads as the user's prompt skeleton by default.
-  // A run with no natural-language reply (pure tool/system plumbing) falls
-  // back to the plainer "··· N 步" ToolGroupNode.
+  // column. Only emits a .tn-children container at real rewind forks (2+
+  // conversation-spine children). Claude Code records tool_result / attachment
+  // as siblings of the next assistant — that is NOT a rewind, so we flatten
+  // those fake forks into one run. Everything between two real user messages
+  // collapses into a single AgentGroupNode so the tree reads as the user's
+  // prompt skeleton, matching Cursor / Codex / Grok. A run with no
+  // natural-language reply falls back to "··· N 步".
   function Chain({ startUuid }: { startUuid: string }): JSX.Element {
     const rows: JSX.Element[] = [];
-    let cur: string | null = startUuid;
+    const seq: string[] = [];
+    const branch = flattenLinearRun(startUuid, byUuid, childrenOf, seq);
     let agentBuf: string[] = [];
     const flushAgent = () => {
       if (agentBuf.length === 0) return;
@@ -116,7 +123,7 @@ export function TreeView(props: {
           <ToolGroupNode
             key={uuids[0] + ":tg"}
             uuids={uuids}
-              clickedUuid={clickedUuid ?? null}
+            clickedUuid={clickedUuid ?? null}
             trackedUuid={trackedUuid ?? null}
             renderRow={(u) => <Row key={u} uuid={u} isBranchPoint={false} />}
           />
@@ -134,40 +141,29 @@ export function TreeView(props: {
         />
       );
     };
-    while (cur) {
-      const e = byUuid[cur];
-      if (!e) break;
-      const kids: string[] = childrenOf[cur] ?? [];
-      const branching = kids.length > 1;
-      // Buffer agent content (assistant replies + tool/system plumbing) that
-      // isn't a branch point; it renders as a single collapsed AgentGroupNode
-      // when we reach the next real user message or a branch.
-      if (!isRealUserMessage(e) && !branching) {
-        agentBuf.push(cur);
-        if (kids.length === 1) {
-          cur = kids[0];
-          continue;
-        }
-        break;
-      }
-      flushAgent();
-      rows.push(<Row key={cur} uuid={cur} isBranchPoint={branching} />);
-      if (kids.length === 1) {
-        cur = kids[0];
-        continue;
-      }
-      if (branching) {
+    for (const uuid of seq) {
+      const e = byUuid[uuid];
+      if (!e) continue;
+      const isBranchPoint = branch?.uuid === uuid;
+      if (isRealUserMessage(e) || isBranchPoint) {
+        flushAgent();
         rows.push(
-          <div key={cur + ":children"} className="tn-children">
-            {kids.map((k) => (
-              <Chain key={k} startUuid={k} />
-            ))}
-          </div>
+          <Row key={uuid} uuid={uuid} isBranchPoint={isBranchPoint} />
         );
+      } else {
+        agentBuf.push(uuid);
       }
-      break;
     }
     flushAgent();
+    if (branch) {
+      rows.push(
+        <div key={branch.uuid + ":children"} className="tn-children">
+          {branch.spineKids.map((k) => (
+            <Chain key={k} startUuid={k} />
+          ))}
+        </div>
+      );
+    }
     return <Fragment>{rows}</Fragment>;
   }
 
@@ -325,11 +321,91 @@ function AgentGroupNode({
   );
 }
 
+// Walk Claude/Cursor trees into a linear uuid sequence, stopping before a
+// real rewind fork (2+ spine children). Fake forks — tool_result / attachment
+// / slash-command siblings of the next assistant — are flattened in file
+// order so Agent grouping matches linear sources.
+type BranchHit = { uuid: string; spineKids: string[] };
+
+function flattenLinearRun(
+  startUuid: string,
+  byUuid: Record<string, Entry>,
+  childrenOf: Record<string, string[]>,
+  seq: string[]
+): BranchHit | null {
+  let cur: string | null = startUuid;
+  while (cur) {
+    seq.push(cur);
+    const kids: string[] = childrenOf[cur] ?? [];
+    const spine: string[] = [];
+    const plumbing: string[] = [];
+    for (const k of kids) {
+      if (isPlumbingTreeEntry(byUuid[k])) plumbing.push(k);
+      else spine.push(k);
+    }
+    if (spine.length > 1) {
+      for (const p of plumbing) flattenLinearRun(p, byUuid, childrenOf, seq);
+      return { uuid: cur, spineKids: spine };
+    }
+    if (kids.length === 0) return null;
+    if (kids.length === 1) {
+      cur = kids[0];
+      continue;
+    }
+    for (let i = 0; i < kids.length; i++) {
+      if (i === kids.length - 1) {
+        cur = kids[i];
+        break;
+      }
+      const nested = flattenLinearRun(kids[i], byUuid, childrenOf, seq);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+function spineChildCount(
+  uuid: string,
+  childrenOf: Record<string, string[]>,
+  byUuid: Record<string, Entry>
+): number {
+  return (childrenOf[uuid] ?? []).filter((k) => !isPlumbingTreeEntry(byUuid[k])).length;
+}
+
+// Spine = real user prompts and assistant nodes. Everything else (tool
+// results, attachments, isMeta skill dumps, /model, interrupts) is the same
+// turn's plumbing — Claude stores those as siblings, which used to look
+// like rewind branches.
+function isPlumbingTreeEntry(e: Entry | undefined): boolean {
+  if (!e) return true;
+  if (e.kind === "assistant") return false;
+  if (isRealUserMessage(e)) return false;
+  return true;
+}
+
 // A real user message — a user-role entry carrying actual input, not a
-// tool_result wrapper (the API encodes tool outputs as user-role messages).
-// These stay as visible Rows; everything else folds into the agent turn.
+// tool_result wrapper, skill/meta injection, slash-command setting, or the
+// "[Request interrupted …]" stub Claude inserts on abort.
 function isRealUserMessage(e: Entry | undefined): boolean {
-  return !!e && e.kind === "user" && !isToolResultEntry(e);
+  if (!e || e.kind !== "user") return false;
+  if (e.isMeta || isToolResultEntry(e)) return false;
+  const text = userPlainText(e);
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("[Request interrupted by user")) return false;
+  return hasMeaningfulTitle(text);
+}
+
+function userPlainText(e: Entry): string {
+  if (e.kind !== "user") return "";
+  const c = e.content;
+  if (typeof c === "string") return c;
+  if (!Array.isArray(c)) return "";
+  const parts: string[] = [];
+  for (const b of c as ContentBlock[]) {
+    if (b.type === "text" && b.text) parts.push(b.text);
+  }
+  return parts.join("\n");
 }
 
 // True when an assistant entry contains a non-empty natural-language reply.
@@ -345,14 +421,16 @@ function hasAssistantText(e: Entry | undefined): boolean {
 function previewOf(e: Entry): string {
   if (e.kind === "user") {
     if (typeof e.content === "string") {
-      return truncate(stripTags(e.content));
+      return truncate(cleanSessionTitle(e.content, 90) || stripTags(e.content));
     }
     for (const b of e.content as ContentBlock[]) {
       if (b.type === "tool_result") {
         const tr = typeof b.content === "string" ? b.content : "";
         return "⇐ " + truncate(tr) || "(tool result)";
       }
-      if (b.type === "text") return truncate(b.text);
+      if (b.type === "text") {
+        return truncate(cleanSessionTitle(b.text, 90) || b.text);
+      }
       if (b.type === "image") return "🖼 image";
     }
     return "(user)";
