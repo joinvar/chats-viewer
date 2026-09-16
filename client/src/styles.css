@@ -237,6 +237,10 @@ body.col-resizing * {
 .list-header {
   position: sticky;
   top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   background: var(--bg);
   padding: 10px 14px;
   font-size: 11px;
@@ -246,6 +250,29 @@ body.col-resizing * {
   border-bottom: 1px solid var(--border-soft);
   font-weight: 500;
   z-index: 1;
+}
+.list-header-label {
+  min-width: 0;
+}
+.list-refresh-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--fg-mute);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.list-refresh-btn:hover:not(:disabled) {
+  background: var(--bg-1);
+  color: var(--accent);
+}
+.list-refresh-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 .list-load-more {
   text-align: center;

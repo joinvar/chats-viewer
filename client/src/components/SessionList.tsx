@@ -26,6 +26,8 @@ export function SessionList(props: {
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   const {
     sessions,
@@ -44,15 +46,27 @@ export function SessionList(props: {
     hasMore,
     loadingMore,
     onLoadMore,
+    onRefresh,
+    refreshing,
   } = props;
 
   const listRef = useRef<HTMLDivElement>(null);
   // Guard against scroll storms while a page request is in flight.
   const loadMoreLock = useRef(false);
+  const wasRefreshing = useRef(false);
 
   useEffect(() => {
     if (!loadingMore) loadMoreLock.current = false;
   }, [loadingMore]);
+
+  // After a list refresh, jump to the top so newly created conversations
+  // (sorted newest-first) are visible without hunting.
+  useEffect(() => {
+    if (wasRefreshing.current && !refreshing && listRef.current) {
+      listRef.current.scrollTop = 0;
+    }
+    wasRefreshing.current = !!refreshing;
+  }, [refreshing]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -84,8 +98,21 @@ export function SessionList(props: {
   return (
     <div className="list" ref={listRef}>
       <div className="list-header">
-        {headerLabel}
-        {countLabel}
+        <span className="list-header-label">
+          {headerLabel}
+          {countLabel}
+        </span>
+        {onRefresh && (
+          <button
+            type="button"
+            className="list-refresh-btn"
+            onClick={onRefresh}
+            disabled={refreshing}
+            title="重新扫描本地会话，列出新对话（不重新加载当前对话）"
+          >
+            <span className={"refresh-icon" + (refreshing ? " spinning" : "")}>↻</span>
+          </button>
+        )}
       </div>
       {loading && sessions.length === 0 && <div className="hint">Loading…</div>}
       {!loading && sessions.length === 0 && (

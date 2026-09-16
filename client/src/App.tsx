@@ -169,6 +169,7 @@ export default function App() {
   const [loadingMoreSessions, setLoadingMoreSessions] = useState(false);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [refreshingTranscript, setRefreshingTranscript] = useState(false);
+  const [refreshingLists, setRefreshingLists] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -721,6 +722,100 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, sessionId, activeSource, sessionsReady, conversationMode]);
 
+  // Re-scan local session files and refresh the project / conversation lists.
+  // Does NOT reload the currently open transcript — that's what the transcript
+  // "刷新" button is for. Faster than a full browser reload because we skip
+  // remounting the app and re-parsing the open conversation.
+  async function refreshLists() {
+    if (refreshingLists) return;
+    setRefreshingLists(true);
+    setError(null);
+    const snapshot = {
+      view,
+      unifiedMode,
+      projectId,
+      activeSource,
+      conversationMode,
+    };
+    try {
+      if (snapshot.conversationMode) {
+        const gen = ++allSessionsGen.current;
+        const limit = Math.min(
+          500,
+          Math.max(LIST_PAGE_SIZE, allSessions.length || LIST_PAGE_SIZE)
+        );
+        const page = await api.allSessions(0, limit, true);
+        if (gen !== allSessionsGen.current) return;
+        if (view !== snapshot.view || unifiedMode !== snapshot.unifiedMode) return;
+        setAllSessions(page.items);
+        setAllSessionsTotal(page.total);
+        setAllSessionsHasMore(page.hasMore);
+        setLoadingAllSessions(false);
+        setLoadingMoreAllSessions(false);
+      } else {
+        const pgen = ++projectsGen.current;
+        const projectLimit = Math.min(
+          500,
+          Math.max(LIST_PAGE_SIZE, projects.length || LIST_PAGE_SIZE)
+        );
+        const projectsPromise =
+          snapshot.view === "all"
+            ? api.allProjects(0, projectLimit, true)
+            : api.projects(snapshot.view, 0, projectLimit, true);
+
+        const sgen = snapshot.projectId ? ++sessionsGen.current : sessionsGen.current;
+        const sessionLimit = Math.min(
+          500,
+          Math.max(LIST_PAGE_SIZE, sessionsData?.items.length || LIST_PAGE_SIZE)
+        );
+        const sessionsPromise = snapshot.projectId
+          ? api.sessions(
+              snapshot.projectId,
+              snapshot.activeSource,
+              0,
+              sessionLimit,
+              true
+            )
+          : Promise.resolve(null);
+
+        const [projectsPage, sessionsPage] = await Promise.all([
+          projectsPromise,
+          sessionsPromise,
+        ]);
+
+        if (view !== snapshot.view || unifiedMode !== snapshot.unifiedMode) return;
+        if (pgen === projectsGen.current) {
+          setProjects(projectsPage.items);
+          setProjectsTotal(projectsPage.total);
+          setProjectsHasMore(projectsPage.hasMore);
+          setLoadingProjects(false);
+          setLoadingMoreProjects(false);
+        }
+        if (
+          sessionsPage &&
+          snapshot.projectId &&
+          sgen === sessionsGen.current &&
+          projectId === snapshot.projectId &&
+          activeSource === snapshot.activeSource
+        ) {
+          setSessionsData({
+            projectId: snapshot.projectId,
+            source: snapshot.activeSource,
+            items: sessionsPage.items,
+            total: sessionsPage.total,
+            hasMore: sessionsPage.hasMore,
+          });
+          setLoadingSessions(false);
+          setLoadingMoreSessions(false);
+        }
+      }
+    } catch (e) {
+      setError(`刷新列表失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRefreshingLists(false);
+    }
+  }
+
   async function refreshTranscript() {
     if (!projectId || !sessionId) return;
     const currentProjectId = projectId;
@@ -825,6 +920,15 @@ export default function App() {
               </button>
             )}
             <button
+              className={"toggle refresh-btn" + (refreshingLists ? " on" : "")}
+              onClick={() => refreshLists()}
+              disabled={refreshingLists}
+              title="重新扫描本地会话，列出新对话。不会重新加载当前正在看的对话内容。"
+            >
+              <span className={"refresh-icon" + (refreshingLists ? " spinning" : "")}>↻</span>
+              {refreshingLists ? " 刷新中" : " 刷新列表"}
+            </button>
+            <button
               className={"toggle" + (vis.sessions ? " on" : "")}
               onClick={() => toggleVis("sessions")}
               title={conversationMode ? "显示/隐藏对话列表" : "Toggle sessions panel"}
@@ -904,6 +1008,8 @@ export default function App() {
                   hasMore={allSessionsHasMore}
                   loadingMore={loadingMoreAllSessions}
                   onLoadMore={loadMoreAllSessions}
+                  onRefresh={refreshLists}
+                  refreshing={refreshingLists}
                 />
               ) : (
                 <SessionList
@@ -921,6 +1027,8 @@ export default function App() {
                   hasMore={sessionsHasMore}
                   loadingMore={loadingMoreSessions}
                   onLoadMore={loadMoreSessions}
+                  onRefresh={refreshLists}
+                  refreshing={refreshingLists}
                 />
               )}
             </aside>

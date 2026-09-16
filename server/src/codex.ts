@@ -13,6 +13,7 @@ import type {
   ContentBlock,
 } from "./types.js";
 import { dirSafe, parseJsonLine } from "./util.js";
+import { evictCachedProject, evictCachedSession, summarizeCached } from "./summaryCache.js";
 
 export const CODEX_HOME = process.env.CODEX_HOME
   ? path.resolve(process.env.CODEX_HOME)
@@ -109,8 +110,10 @@ async function readCodexMeta(filePath: string): Promise<Omit<CodexFileInfo, "fil
 const CODEX_FILES_TTL_MS = 1500;
 let codexFilesCache: { at: number; files: CodexFileInfo[] } | null = null;
 let codexFilesInflight: Promise<CodexFileInfo[]> | null = null;
+// Survives TTL invalidation so a "fresh" rescan only reads headers of new files.
+let codexFileMetaByPath = new Map<string, CodexFileInfo>();
 
-function invalidateCodexFilesCache(): void {
+export function invalidateCodexFilesCache(): void {
   codexFilesCache = null;
 }
 
@@ -119,20 +122,42 @@ async function scanCodexFiles(): Promise<CodexFileInfo[]> {
   const files: string[] = [];
   await walkJsonl(CODEX_SESSIONS_ROOT, files);
   const out: CodexFileInfo[] = [];
+  const next = new Map<string, CodexFileInfo>();
   for (const file of files) {
     try {
       const st = await fs.promises.stat(file);
+      const prev = codexFileMetaByPath.get(file);
+      if (prev && prev.mtime === st.mtimeMs) {
+        out.push(prev);
+        next.set(file, prev);
+        continue;
+      }
+      if (prev) {
+        // session_meta sits at the start of the file and does not change as
+        // the conversation grows — only mtime / endedAt need a refresh.
+        const updated: CodexFileInfo = {
+          ...prev,
+          mtime: st.mtimeMs,
+          endedAt: new Date(st.mtimeMs).toISOString(),
+        };
+        out.push(updated);
+        next.set(file, updated);
+        continue;
+      }
       const meta = await readCodexMeta(file);
-      out.push({
+      const info: CodexFileInfo = {
         ...meta,
         file,
         mtime: st.mtimeMs,
         endedAt: meta.endedAt ?? new Date(st.mtimeMs).toISOString(),
-      });
+      };
+      out.push(info);
+      next.set(file, info);
     } catch {
       // skip broken files
     }
   }
+  codexFileMetaByPath = next;
   return out;
 }
 
@@ -202,13 +227,15 @@ export async function listCodexSessions(projectId: string): Promise<SessionSumma
   const titles = await readCodexTitles();
   const files = (await listCodexFiles()).filter((f) => f.projectId === projectId);
   const settled = await Promise.all(
-    files.map(async (f) => {
-      try {
-        return await summarizeCodexSession(f, titles[f.sessionId]);
-      } catch {
-        return null;
-      }
-    })
+    files.map((f) =>
+      summarizeCached(
+        "codex",
+        f.file,
+        [f.file],
+        () => summarizeCodexSession(f, titles[f.sessionId]),
+        titles[f.sessionId]?.threadName ?? ""
+      )
+    )
   );
   const results = settled.filter((s): s is SessionSummary => s != null);
   results.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));
@@ -453,6 +480,7 @@ export async function deleteCodexProject(projectId: string): Promise<void> {
   assertSafeId(projectId);
   const files = (await listCodexFiles()).filter((f) => f.projectId === projectId);
   if (files.length === 0) throw new Error("project not found");
+  evictCachedProject("codex", projectId);
   for (const f of files) {
     assertSafeCodexFile(f.file);
     await fs.promises.unlink(f.file);
@@ -508,12 +536,16 @@ async function doRenameCodexSession(sessionId: string, customTitle: string): Pro
   const tmp = `${CODEX_INDEX_PATH}.tmp-${process.pid}-${Date.now()}`;
   await fs.promises.writeFile(tmp, lines.join("\n") + "\n", "utf8");
   await fs.promises.rename(tmp, CODEX_INDEX_PATH);
+  // Title lives in session_index.jsonl, not the session file, so the
+  // mtime-based summary cache would otherwise keep serving the old name.
+  evictCachedSession("codex", sessionId);
 }
 
 export async function deleteCodexSession(projectId: string, sessionId: string): Promise<void> {
   const file = await codexSessionFilePath(projectId, sessionId);
   assertSafeCodexFile(file);
   await fs.promises.unlink(file);
+  evictCachedSession("codex", sessionId);
   invalidateCodexFilesCache();
 }
 

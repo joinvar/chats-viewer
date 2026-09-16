@@ -13,6 +13,7 @@ import type {
   ContentBlock,
 } from "./types.js";
 import { dirSafe, parseJsonLine } from "./util.js";
+import { evictCachedProject, evictCachedSession, summarizeCached } from "./summaryCache.js";
 
 /**
  * Cursor stores agent transcripts under
@@ -98,13 +99,11 @@ export async function listCursorProjects(): Promise<ProjectSummary[]> {
 export async function listCursorSessions(projectId: string): Promise<SessionSummary[]> {
   const chats = await listChatFiles(projectId);
   const settled = await Promise.all(
-    chats.map(async ({ chatId, file }) => {
-      try {
-        return await summarizeCursorSession(projectId, chatId, file);
-      } catch {
-        return null;
-      }
-    })
+    chats.map(({ chatId, file }) =>
+      summarizeCached("cursor", file, [file], () =>
+        summarizeCursorSession(projectId, chatId, file)
+      )
+    )
   );
   const results = settled.filter((s): s is SessionSummary => s != null);
   results.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));
@@ -286,6 +285,7 @@ export async function deleteCursorProject(projectId: string): Promise<void> {
     throw new Error("path escapes projects root");
   }
   if (!fs.existsSync(dir)) throw new Error("project not found");
+  evictCachedProject("cursor", projectId);
   // Only remove the agent-transcripts subtree — leave the rest of Cursor's
   // per-project state (terminals, mcps, canvases, ...) alone.
   await fs.promises.rm(dir, { recursive: true, force: true });
@@ -300,5 +300,6 @@ export async function deleteCursorSession(projectId: string, sessionId: string):
     throw new Error("path escapes projects root");
   }
   if (!fs.existsSync(dir)) throw new Error("session not found");
+  evictCachedSession("cursor", sessionId);
   await fs.promises.rm(dir, { recursive: true, force: true });
 }

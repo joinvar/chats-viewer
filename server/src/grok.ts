@@ -13,6 +13,7 @@ import type {
   ContentBlock,
 } from "./types.js";
 import { dirSafe, parseJsonLine } from "./util.js";
+import { evictCachedProject, evictCachedSession, summarizeCached } from "./summaryCache.js";
 
 /**
  * Grok (xAI / Grok Build CLI) stores sessions under
@@ -199,13 +200,18 @@ export async function listGrokSessions(projectId: string): Promise<SessionSummar
   assertSafeProjectId(projectId);
   const sessions = await listSessionDirs(projectId);
   const settled = await Promise.all(
-    sessions.map(async ({ sessionId, dir }) => {
-      try {
-        return await summarizeGrokSession(projectId, sessionId, dir);
-      } catch {
-        return null;
-      }
-    })
+    sessions.map(({ sessionId, dir }) =>
+      summarizeCached(
+        "grok",
+        dir,
+        [
+          path.join(dir, "summary.json"),
+          path.join(dir, "updates.jsonl"),
+          path.join(dir, "chat_history.jsonl"),
+        ],
+        () => summarizeGrokSession(projectId, sessionId, dir)
+      )
+    )
   );
   const results = settled.filter((s): s is SessionSummary => s != null);
   results.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));
@@ -848,6 +854,7 @@ export async function deleteGrokProject(projectId: string): Promise<void> {
   const dir = projectDir(projectId);
   assertUnderSessions(dir);
   if (!fs.existsSync(dir)) throw new Error("project not found");
+  evictCachedProject("grok", projectId);
   // Only the project group under sessions/ — never touch ~/.grok config/skills.
   await fs.promises.rm(dir, { recursive: true, force: true });
 }
@@ -861,6 +868,7 @@ export async function deleteGrokSession(
   const dir = sessionDir(projectId, sessionId);
   assertUnderSessions(dir);
   if (!fs.existsSync(dir)) throw new Error("session not found");
+  evictCachedSession("grok", sessionId);
   await fs.promises.rm(dir, { recursive: true, force: true });
 }
 

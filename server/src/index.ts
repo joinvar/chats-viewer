@@ -41,6 +41,7 @@ import {
   deleteCodexProject,
   deleteCodexSession,
   renameCodexSession,
+  invalidateCodexFilesCache,
 } from "./codex.js";
 import {
   listGrokProjects,
@@ -113,6 +114,19 @@ function parseSearchRole(value: unknown): SearchRole | undefined {
   return value === "user" || value === "assistant" ? value : undefined;
 }
 
+/** Bust listing caches so a refresh can pick up newly created sessions. */
+function refreshListingsIfRequested(req: express.Request): void {
+  const v = req.query.fresh;
+  if (v === "1" || v === "true") {
+    invalidateAllCaches();
+    invalidateCodexFilesCache();
+  }
+}
+
+function noStore(res: express.Response): void {
+  res.set("Cache-Control", "no-store");
+}
+
 /** Parse limit/offset query params for progressive list loading. */
 function parsePage(req: express.Request): { offset: number; limit: number } {
   const rawOffset = parseInt(String(req.query.offset ?? "0"), 10);
@@ -144,6 +158,8 @@ function resolveWithinRoot(root: string, id: string): string {
 // everything can pass a large limit or page through hasMore.
 app.get("/api/all/projects", async (req, res) => {
   try {
+    refreshListingsIfRequested(req);
+    noStore(res);
     const { offset, limit } = parsePage(req);
     res.json(await listAllProjectsPage(offset, limit));
   } catch (e: any) {
@@ -153,6 +169,8 @@ app.get("/api/all/projects", async (req, res) => {
 
 app.get("/api/all/sessions", async (req, res) => {
   try {
+    refreshListingsIfRequested(req);
+    noStore(res);
     const { offset, limit } = parsePage(req);
     res.json(await listAllSessionsPage(offset, limit));
   } catch (e: any) {
@@ -162,6 +180,8 @@ app.get("/api/all/sessions", async (req, res) => {
 
 app.get("/api/projects", async (req, res) => {
   try {
+    refreshListingsIfRequested(req);
+    noStore(res);
     const src = pickSource(req);
     const { offset, limit } = parsePage(req);
     const all =
@@ -180,6 +200,8 @@ app.get("/api/projects", async (req, res) => {
 
 app.get("/api/projects/:id/sessions", async (req, res) => {
   try {
+    refreshListingsIfRequested(req);
+    noStore(res);
     const src = pickSource(req);
     const { offset, limit } = parsePage(req);
     const all =

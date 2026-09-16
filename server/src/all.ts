@@ -1,8 +1,9 @@
+import fs from "node:fs";
 import type { PageResult, ProjectSummary, SessionSummary, ToolSource } from "./types.js";
-import { listProjects, listSessions } from "./projects.js";
-import { listCursorProjects, listCursorSessions } from "./cursor.js";
-import { listCodexProjects, listCodexSessions } from "./codex.js";
-import { listGrokProjects, listGrokSessions } from "./grok.js";
+import { listProjects, listSessions, PROJECTS_ROOT } from "./projects.js";
+import { listCursorProjects, listCursorSessions, CURSOR_PROJECTS_ROOT } from "./cursor.js";
+import { listCodexProjects, listCodexSessions, listCodexFiles } from "./codex.js";
+import { listGrokProjects, listGrokSessions, GROK_SESSIONS_ROOT } from "./grok.js";
 
 // The aggregated ("all") view merges the per-tool listings into one
 // time-sorted stream. Every row is tagged with its `source` so the client can
@@ -81,15 +82,26 @@ export async function listAllProjectsPage(
   return pageSlice(await listAllProjects(), offset, limit);
 }
 
-async function sessionsForSource(source: ToolSource): Promise<SessionSummary[]> {
-  const listProjectsFn =
+async function listProjectIds(source: ToolSource): Promise<string[]> {
+  if (source === "codex") {
+    const files = await listCodexFiles().catch(() => []);
+    return [...new Set(files.map((f) => f.projectId))];
+  }
+  const root =
     source === "cursor"
-      ? listCursorProjects
-      : source === "codex"
-      ? listCodexProjects
+      ? CURSOR_PROJECTS_ROOT
       : source === "grok"
-      ? listGrokProjects
-      : listProjects;
+      ? GROK_SESSIONS_ROOT
+      : PROJECTS_ROOT;
+  if (!fs.existsSync(root)) return [];
+  const dirents = await fs.promises.readdir(root, { withFileTypes: true });
+  return dirents.filter((d) => d.isDirectory()).map((d) => d.name);
+}
+
+async function sessionsForSource(source: ToolSource): Promise<SessionSummary[]> {
+  // Only need project ids here — listProjects() also stats every session file
+  // and peeks inside the newest one for cwd, which doubled the cost of the
+  // aggregated conversation stream.
   const listSessionsFn =
     source === "cursor"
       ? listCursorSessions
@@ -99,9 +111,9 @@ async function sessionsForSource(source: ToolSource): Promise<SessionSummary[]> 
       ? listGrokSessions
       : listSessions;
 
-  const projects = await listProjectsFn().catch(() => [] as ProjectSummary[]);
+  const ids = await listProjectIds(source).catch(() => [] as string[]);
   const perProject = await Promise.all(
-    projects.map((p) => listSessionsFn(p.id).catch(() => [] as SessionSummary[]))
+    ids.map((id) => listSessionsFn(id).catch(() => [] as SessionSummary[]))
   );
   return tagSessions(perProject.flat(), source);
 }
@@ -114,15 +126,27 @@ const ALL_SESSIONS_TTL_MS = 60_000;
 let allSessionsCache: { at: number; sessions: SessionSummary[] } | null = null;
 let allSessionsInflight: Promise<SessionSummary[]> | null = null;
 
+async function timedSource(
+  source: ToolSource
+): Promise<{ source: ToolSource; sessions: SessionSummary[]; ms: number }> {
+  const t0 = Date.now();
+  const sessions = await sessionsForSource(source);
+  return { source, sessions, ms: Date.now() - t0 };
+}
+
 async function computeAllSessions(): Promise<SessionSummary[]> {
-  const [claude, cursor, codex, grok] = await Promise.all([
-    sessionsForSource("claude"),
-    sessionsForSource("cursor"),
-    sessionsForSource("codex"),
-    sessionsForSource("grok"),
+  const parts = await Promise.all([
+    timedSource("claude"),
+    timedSource("cursor"),
+    timedSource("codex"),
+    timedSource("grok"),
   ]);
-  const all = [...claude, ...cursor, ...codex, ...grok];
+  const all = parts.flatMap((p) => p.sessions);
   all.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));
+  const detail = parts
+    .map((p) => `${p.source}=${p.sessions.length}/${p.ms}ms`)
+    .join(" ");
+  console.log(`[all/sessions] ${all.length} sessions ${detail}`);
   return all;
 }
 

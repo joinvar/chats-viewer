@@ -29,6 +29,16 @@ function withPage(url: string, offset: number, limit: number): string {
   return `${url}${sep}offset=${offset}&limit=${limit}`;
 }
 
+function withFresh(url: string, fresh?: boolean): string {
+  if (!fresh) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}fresh=1`;
+}
+
+function listOpts(fresh?: boolean): RequestInit | undefined {
+  return fresh ? { cache: "no-store" } : undefined;
+}
+
 /** HTTP error with status so callers can distinguish 404 (stale selection) etc. */
 export class ApiError extends Error {
   status: number;
@@ -43,8 +53,8 @@ export function isNotFoundError(e: unknown): boolean {
   return e instanceof ApiError && e.status === 404;
 }
 
-async function j<T>(url: string): Promise<T> {
-  const r = await fetch(url);
+async function j<T>(url: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(url, init);
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`;
     try {
@@ -111,35 +121,47 @@ export const api = {
   projects: (
     source: Source = "claude",
     offset = 0,
-    limit = LIST_PAGE_SIZE
+    limit = LIST_PAGE_SIZE,
+    fresh = false
   ) =>
     j<PageResult<ProjectSummary>>(
-      withPage(withSource("/api/projects", source), offset, limit)
+      withFresh(
+        withPage(withSource("/api/projects", source), offset, limit),
+        fresh
+      ),
+      listOpts(fresh)
     ),
   sessions: (
     projectId: string,
     source: Source = "claude",
     offset = 0,
-    limit = LIST_PAGE_SIZE
+    limit = LIST_PAGE_SIZE,
+    fresh = false
   ) =>
     j<PageResult<SessionSummary>>(
-      withPage(
-        withSource(
-          `/api/projects/${encodeURIComponent(projectId)}/sessions`,
-          source
+      withFresh(
+        withPage(
+          withSource(
+            `/api/projects/${encodeURIComponent(projectId)}/sessions`,
+            source
+          ),
+          offset,
+          limit
         ),
-        offset,
-        limit
-      )
+        fresh
+      ),
+      listOpts(fresh)
     ),
   // Aggregated cross-tool listings. Each row carries its own `source`.
-  allProjects: (offset = 0, limit = LIST_PAGE_SIZE) =>
+  allProjects: (offset = 0, limit = LIST_PAGE_SIZE, fresh = false) =>
     j<PageResult<ProjectSummary>>(
-      withPage("/api/all/projects", offset, limit)
+      withFresh(withPage("/api/all/projects", offset, limit), fresh),
+      listOpts(fresh)
     ),
-  allSessions: (offset = 0, limit = LIST_PAGE_SIZE) =>
+  allSessions: (offset = 0, limit = LIST_PAGE_SIZE, fresh = false) =>
     j<PageResult<SessionSummary>>(
-      withPage("/api/all/sessions", offset, limit)
+      withFresh(withPage("/api/all/sessions", offset, limit), fresh),
+      listOpts(fresh)
     ),
   session: loadTranscript,
   search: (

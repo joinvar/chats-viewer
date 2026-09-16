@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
 import type { ProjectSummary, SessionSummary } from "./types.js";
+import { evictCachedProject, evictCachedSession, summarizeCached } from "./summaryCache.js";
 
 export const PROJECTS_ROOT = path.join(os.homedir(), ".claude", "projects");
 
@@ -197,12 +198,11 @@ export async function listSessions(projectId: string): Promise<SessionSummary[]>
   // Parallelize per-file summarize — listing hundreds of sessions sequentially
   // is the main cost of the aggregated "all conversations" view.
   const settled = await Promise.all(
-    files.map(async (f) => {
-      try {
-        return await summarizeSession(projectId, path.join(dir, f));
-      } catch {
-        return null;
-      }
+    files.map((f) => {
+      const filePath = path.join(dir, f);
+      return summarizeCached("claude", filePath, [filePath], () =>
+        summarizeSession(projectId, filePath)
+      );
     })
   );
   const results = settled.filter((s): s is SessionSummary => s != null);
@@ -234,6 +234,7 @@ export async function deleteProject(projectId: string): Promise<void> {
     throw new Error("path escapes projects root");
   }
   if (!fs.existsSync(dir)) throw new Error("project not found");
+  evictCachedProject("claude", projectId);
   await fs.promises.rm(dir, { recursive: true, force: true });
 }
 
@@ -246,6 +247,7 @@ export async function deleteSession(projectId: string, sessionId: string): Promi
     throw new Error("path escapes projects root");
   }
   if (!fs.existsSync(file)) throw new Error("session not found");
+  evictCachedSession("claude", sessionId);
   await fs.promises.unlink(file);
 }
 
