@@ -17,7 +17,7 @@ export function CopyResume(props: {
       : source === "cursor"
       ? `cursor-agent --resume=${sessionId} --yolo`
       : source === "grok"
-      ? `agent --resume=${sessionId} --permission-mode bypassPermissions`
+      ? `grok --resume=${sessionId} --permission-mode bypassPermissions`
       : null;
 
   if (!command) return null;
