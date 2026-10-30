@@ -4,6 +4,7 @@ import os from "node:os";
 import readline from "node:readline";
 import type { ProjectSummary, SessionSummary } from "./types.js";
 import { evictCachedProject, evictCachedSession, summarizeCached } from "./summaryCache.js";
+import { promptOnlySnapshot, summarizePromptOnly } from "./claudeHistory.js";
 
 export const PROJECTS_ROOT = path.join(os.homedir(), ".claude", "projects");
 
@@ -25,45 +26,80 @@ export function decodeProjectId(id: string): string {
 }
 
 export async function listProjects(): Promise<ProjectSummary[]> {
-  if (!fs.existsSync(PROJECTS_ROOT)) return [];
-  const dirents = await fs.promises.readdir(PROJECTS_ROOT, { withFileTypes: true });
   const out: ProjectSummary[] = [];
-  for (const d of dirents) {
-    if (!d.isDirectory()) continue;
-    const dirPath = path.join(PROJECTS_ROOT, d.name);
-    let sessionCount = 0;
-    let lastModified = 0;
-    let newestFile = "";
-    try {
-      const files = await fs.promises.readdir(dirPath);
-      for (const f of files) {
-        if (!f.endsWith(".jsonl")) continue;
-        sessionCount++;
-        try {
-          const st = await fs.promises.stat(path.join(dirPath, f));
-          if (st.mtimeMs > lastModified) {
-            lastModified = st.mtimeMs;
-            newestFile = path.join(dirPath, f);
-          }
-        } catch {}
+  if (fs.existsSync(PROJECTS_ROOT)) {
+    const dirents = await fs.promises.readdir(PROJECTS_ROOT, { withFileTypes: true });
+    for (const d of dirents) {
+      if (!d.isDirectory()) continue;
+      const dirPath = path.join(PROJECTS_ROOT, d.name);
+      let sessionCount = 0;
+      let lastModified = 0;
+      let newestFile = "";
+      try {
+        const files = await fs.promises.readdir(dirPath);
+        for (const f of files) {
+          if (!f.endsWith(".jsonl")) continue;
+          sessionCount++;
+          try {
+            const st = await fs.promises.stat(path.join(dirPath, f));
+            if (st.mtimeMs > lastModified) {
+              lastModified = st.mtimeMs;
+              newestFile = path.join(dirPath, f);
+            }
+          } catch {}
+        }
+      } catch {
+        continue;
       }
-    } catch {
-      continue;
+      // Real cwd comes from inside the session file. The dir-name decoder loses
+      // info when the original path contains a `-`, so prefer the session's
+      // recorded value and fall back to the decoder if we can't read one.
+      const realCwd = newestFile ? await readCwdFromSession(newestFile) : undefined;
+      out.push({
+        id: d.name,
+        cwd: realCwd ?? decodeProjectId(d.name),
+        sessionCount,
+        lastModified: lastModified ? new Date(lastModified).toISOString() : "",
+        revealPath: dirPath,
+      });
     }
-    // Real cwd comes from inside the session file. The dir-name decoder loses
-    // info when the original path contains a `-`, so prefer the session's
-    // recorded value and fall back to the decoder if we can't read one.
-    const realCwd = newestFile ? await readCwdFromSession(newestFile) : undefined;
-    out.push({
-      id: d.name,
-      cwd: realCwd ?? decodeProjectId(d.name),
-      sessionCount,
-      lastModified: lastModified ? new Date(lastModified).toISOString() : "",
-      revealPath: dirPath,
-    });
   }
+  await mergePromptOnlyProjects(out);
   out.sort((a, b) => (b.lastModified || "").localeCompare(a.lastModified || ""));
   return out;
+}
+
+/** Add sessions that survive only as typed prompts, and projects that no
+ *  longer have a directory under ~/.claude/projects. */
+async function mergePromptOnlyProjects(out: ProjectSummary[]): Promise<void> {
+  const snap = await promptOnlySnapshot();
+  const byId = new Map(out.map((p) => [p.id, p]));
+  for (const [projectId, sessions] of snap.byProject) {
+    if (sessions.length === 0) continue;
+    const summaries = sessions.map(summarizePromptOnly);
+    const newest = summaries.reduce((a, b) =>
+      (a.endedAt || "") >= (b.endedAt || "") ? a : b
+    );
+    const existing = byId.get(projectId);
+    if (existing) {
+      const hadTranscripts = existing.sessionCount > 0;
+      existing.sessionCount += summaries.length;
+      if ((newest.endedAt || "") > (existing.lastModified || "")) {
+        existing.lastModified = newest.endedAt || existing.lastModified;
+      }
+      if (!hadTranscripts && newest.cwd) existing.cwd = newest.cwd;
+      continue;
+    }
+    const dirPath = path.join(PROJECTS_ROOT, projectId);
+    out.push({
+      id: projectId,
+      cwd: newest.cwd || decodeProjectId(projectId),
+      sessionCount: summaries.length,
+      lastModified: newest.endedAt || "",
+      revealPath: fs.existsSync(dirPath) ? dirPath : undefined,
+    });
+    byId.set(projectId, out[out.length - 1]);
+  }
 }
 
 async function readCwdFromSession(filePath: string): Promise<string | undefined> {
@@ -193,19 +229,26 @@ function hasMeaningfulOpening(text: string): boolean {
 
 export async function listSessions(projectId: string): Promise<SessionSummary[]> {
   const dir = path.join(PROJECTS_ROOT, projectId);
-  if (!fs.existsSync(dir)) return [];
-  const files = (await fs.promises.readdir(dir)).filter((f) => f.endsWith(".jsonl"));
-  // Parallelize per-file summarize — listing hundreds of sessions sequentially
-  // is the main cost of the aggregated "all conversations" view.
-  const settled = await Promise.all(
-    files.map((f) => {
-      const filePath = path.join(dir, f);
-      return summarizeCached("claude", filePath, [filePath], () =>
-        summarizeSession(projectId, filePath)
-      );
-    })
-  );
-  const results = settled.filter((s): s is SessionSummary => s != null);
+  const results: SessionSummary[] = [];
+  if (fs.existsSync(dir)) {
+    const files = (await fs.promises.readdir(dir)).filter((f) => f.endsWith(".jsonl"));
+    // Parallelize per-file summarize — listing hundreds of sessions sequentially
+    // is the main cost of the aggregated "all conversations" view.
+    const settled = await Promise.all(
+      files.map((f) => {
+        const filePath = path.join(dir, f);
+        return summarizeCached("claude", filePath, [filePath], () =>
+          summarizeSession(projectId, filePath)
+        );
+      })
+    );
+    for (const s of settled) if (s) results.push(s);
+  }
+  const snap = await promptOnlySnapshot();
+  const have = new Set(results.map((s) => s.sessionId));
+  for (const s of snap.byProject.get(projectId) ?? []) {
+    if (!have.has(s.sessionId)) results.push(summarizePromptOnly(s));
+  }
   results.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));
   return results;
 }

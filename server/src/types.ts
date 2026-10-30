@@ -97,6 +97,9 @@ export interface SessionMeta {
   startedAt?: string;
   endedAt?: string;
   messageCount: number;
+  // True when the transcript jsonl is gone and this row is rebuilt from
+  // ~/.claude/history.jsonl — user prompts only, no assistant replies.
+  promptOnly?: boolean;
   // Absolute path of the session's backing file, for the reveal-in-file-manager
   // button's tooltip. Undefined only for sources where it can't be resolved.
   revealPath?: string;

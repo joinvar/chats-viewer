@@ -96,6 +96,8 @@ export interface SessionMeta {
   startedAt?: string;
   endedAt?: string;
   messageCount: number;
+  // True when Claude deleted the transcript and only the typed prompts remain.
+  promptOnly?: boolean;
   // Absolute path of the session's backing file, for the reveal button's tooltip.
   revealPath?: string;
 }

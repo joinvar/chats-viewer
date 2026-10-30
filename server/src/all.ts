@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import type { PageResult, ProjectSummary, SessionSummary, ToolSource } from "./types.js";
 import { listProjects, listSessions, PROJECTS_ROOT } from "./projects.js";
+import { promptOnlyProjectIds } from "./claudeHistory.js";
 import { listCursorProjects, listCursorSessions, CURSOR_PROJECTS_ROOT } from "./cursor.js";
 import { listCodexProjects, listCodexSessions, listCodexFiles } from "./codex.js";
 import { listGrokProjects, listGrokSessions, GROK_SESSIONS_ROOT } from "./grok.js";
@@ -93,9 +94,14 @@ async function listProjectIds(source: ToolSource): Promise<string[]> {
       : source === "grok"
       ? GROK_SESSIONS_ROOT
       : PROJECTS_ROOT;
-  if (!fs.existsSync(root)) return [];
-  const dirents = await fs.promises.readdir(root, { withFileTypes: true });
-  return dirents.filter((d) => d.isDirectory()).map((d) => d.name);
+  const fromDisk = fs.existsSync(root)
+    ? (await fs.promises.readdir(root, { withFileTypes: true }))
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name)
+    : [];
+  if (source !== "claude") return fromDisk;
+  const fromHistory = await promptOnlyProjectIds().catch(() => [] as string[]);
+  return [...new Set([...fromDisk, ...fromHistory])];
 }
 
 async function sessionsForSource(source: ToolSource): Promise<SessionSummary[]> {

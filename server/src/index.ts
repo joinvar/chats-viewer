@@ -12,6 +12,7 @@ import {
   PROJECTS_ROOT,
 } from "./projects.js";
 import { parseSession } from "./parser.js";
+import { getPromptOnlyTranscript } from "./claudeHistory.js";
 import {
   search,
   searchAll,
@@ -229,6 +230,15 @@ app.get("/api/sessions/:projectId/:sessionId", async (req, res) => {
         : src === "grok"
         ? grokSessionFilePath(req.params.projectId, req.params.sessionId)
         : sessionFilePath(req.params.projectId, req.params.sessionId);
+    if (src === "claude" && !fs.existsSync(file)) {
+      const promptOnly = await getPromptOnlyTranscript(
+        req.params.projectId,
+        req.params.sessionId
+      );
+      if (!promptOnly) return res.status(404).json({ error: "not found" });
+      const { byUuid: _omit, ...promptWire } = promptOnly;
+      return res.json(promptWire);
+    }
     if (!fs.existsSync(file)) return res.status(404).json({ error: "not found" });
     const t =
       src === "cursor"

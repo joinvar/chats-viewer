@@ -13,6 +13,7 @@ import {
   parseCodexSession,
 } from "./codex.js";
 import { listGrokFiles, parseGrokSession } from "./grok.js";
+import { getPromptOnlyTranscript, promptOnlySnapshot } from "./claudeHistory.js";
 import type { SearchHit, Entry, ContentBlock } from "./types.js";
 
 export type SearchSource = "claude" | "cursor" | "codex" | "grok";
@@ -165,6 +166,21 @@ async function ensureIndex(source: SearchSource): Promise<void> {
     }
   }
 
+  if (source === "claude") {
+    const snap = await promptOnlySnapshot();
+    for (const s of snap.sessions) {
+      const key = `${s.projectId}::${s.sessionId}`;
+      seen[key] = snap.mtimeMs;
+      if (idx.mtimes[key] !== snap.mtimeMs) {
+        toRefresh.push({
+          projectId: s.projectId,
+          sessionId: s.sessionId,
+          file: `history:${s.sessionId}`,
+        });
+      }
+    }
+  }
+
   // drop rows for deleted files
   idx.rows = idx.rows.filter((r) => seen[`${r.projectId}::${r.sessionId}`] !== undefined);
 
@@ -173,16 +189,18 @@ async function ensureIndex(source: SearchSource): Promise<void> {
       (r) => !(r.projectId === projectId && r.sessionId === sessionId)
     );
     try {
-      const t =
-        source === "cursor"
-          ? await parseCursorSession(projectId, sessionId, file)
-          : source === "codex"
-          ? await parseCodexSession(projectId, sessionId, file)
-          : source === "grok"
-          ? await parseGrokSession(projectId, sessionId, file)
-          : await parseSession(projectId, sessionId, file);
+      const t = file.startsWith("history:")
+        ? await getPromptOnlyTranscript(projectId, sessionId)
+        : source === "cursor"
+        ? await parseCursorSession(projectId, sessionId, file)
+        : source === "codex"
+        ? await parseCodexSession(projectId, sessionId, file)
+        : source === "grok"
+        ? await parseGrokSession(projectId, sessionId, file)
+        : await parseSession(projectId, sessionId, file);
+      if (!t) continue;
       idx.metas[`${projectId}::${sessionId}`] = {
-        customTitle: t.meta.customTitle,
+        customTitle: t.meta.customTitle || (t.meta.promptOnly ? t.meta.lastPrompt : undefined),
         cwd: t.meta.cwd,
       };
       for (const e of t.entries) {

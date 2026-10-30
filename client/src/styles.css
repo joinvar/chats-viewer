@@ -331,6 +331,29 @@ body.col-resizing * {
   background: var(--bg-1);
   border-left-color: var(--accent);
 }
+.item-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.item-title-row .item-title {
+  flex: 1;
+  min-width: 0;
+}
+.badge-prompt-only {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+}
+.prompt-only-banner {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .item-title {
   font-weight: 500;
   color: var(--fg);

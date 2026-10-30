@@ -152,16 +152,23 @@ export function SessionList(props: {
                 </span>
               )}
               <div className="session-row-body">
-                <div className="item-title">{title}</div>
+                <div className="item-title-row">
+                  {s.promptOnly && (
+                    <span className="badge badge-prompt-only" title="全文已删除，只剩你当时输入的内容">
+                      只有输入
+                    </span>
+                  )}
+                  <div className="item-title">{title}</div>
+                </div>
                 <div className="item-footer">
                   <div className="item-sub">
                     {showTool && s.cwd && shortCwd(s.cwd) + " · "}
-                    {s.messageCount} msg
+                    {s.promptOnly ? `${s.messageCount} 条输入` : `${s.messageCount} msg`}
                     {s.endedAt && " · " + formatRelative(s.endedAt)}
                     {s.gitBranch && " · " + s.gitBranch}
                   </div>
                   <div className="item-actions">
-                    {onRename && rowSource !== "cursor" && (
+                    {onRename && rowSource !== "cursor" && !s.promptOnly && (
                       <button
                         className="rename-btn"
                         onClick={(e) => {
@@ -173,7 +180,9 @@ export function SessionList(props: {
                         ✎
                       </button>
                     )}
-                    <CopyResume sessionId={s.sessionId} variant="icon" source={rowSource} />
+                    {!s.promptOnly && (
+                      <CopyResume sessionId={s.sessionId} variant="icon" source={rowSource} />
+                    )}
                     {s.revealPath && (
                       <CopyIconButton
                         text={s.revealPath}
@@ -193,7 +202,7 @@ export function SessionList(props: {
                         📂
                       </button>
                     )}
-                    {dangerMode && onDelete && (
+                    {dangerMode && onDelete && !s.promptOnly && (
                       <button
                         className="delete-btn"
                         onClick={(e) => {

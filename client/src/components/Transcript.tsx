@@ -527,11 +527,23 @@ export function TranscriptView(props: {
             {transcript.meta.startedAt && (
               <span> · {formatTime(transcript.meta.startedAt)}</span>
             )}
-            <span> · {transcript.meta.messageCount} messages</span>
+            <span>
+              {" · "}
+              {transcript.meta.promptOnly
+                ? `${transcript.meta.messageCount} 条输入`
+                : `${transcript.meta.messageCount} messages`}
+            </span>
           </div>
-          <div className="transcript-resume">
-            <CopyResume sessionId={transcript.meta.sessionId} source={source} />
-          </div>
+          {transcript.meta.promptOnly && (
+            <div className="prompt-only-banner">
+              全文已经被 Claude Code 清掉了。下面只剩你当时输入的内容，没有回复。
+            </div>
+          )}
+          {!transcript.meta.promptOnly && (
+            <div className="transcript-resume">
+              <CopyResume sessionId={transcript.meta.sessionId} source={source} />
+            </div>
+          )}
           <div className="transcript-actions">
             {onToggleChrome && (
               <button
