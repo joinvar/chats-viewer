@@ -430,6 +430,16 @@ body.col-resizing * {
   font-weight: 600;
   font-size: 16px;
   letter-spacing: -0.01em;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.transcript-title-text {
+  min-width: 0;
+}
+.transcript-fav-note {
+  grid-column: 1 / -1;
 }
 .transcript-sub {
   grid-column: 1 / -1;
@@ -547,6 +557,106 @@ body.col-resizing * {
   background: var(--bg);
   border-color: var(--border);
   color: var(--accent);
+}
+
+.fav-star {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  padding: 0;
+  border-radius: 3px;
+  color: var(--fg-mute);
+  font-size: 15px;
+  line-height: 22px;
+  text-align: center;
+  opacity: 0.55;
+}
+.list-item:hover .fav-star,
+.fav-star.on,
+.transcript-head .fav-star {
+  opacity: 1;
+}
+.fav-star.on {
+  color: var(--accent);
+}
+.fav-star:hover {
+  background: var(--bg);
+  color: var(--accent);
+}
+.fav-note {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.fav-note-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
+.fav-note-empty {
+  color: var(--fg-mute);
+  font-style: italic;
+}
+.fav-note:hover {
+  color: var(--fg);
+}
+.fav-note-edit textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
+}
+.fav-note-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+.fav-note-count {
+  font-size: 11px;
+  color: var(--fg-mute);
+}
+.fav-note-save {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+}
+.fav-note-save:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.list-item.missing {
+  cursor: default;
+  opacity: 0.78;
+}
+.list-item.missing:hover {
+  background: transparent;
+}
+.badge-missing {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
 }
 
 .reveal-btn {

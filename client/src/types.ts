@@ -141,3 +141,19 @@ export interface SearchHit {
   customTitle?: string;
   cwd?: string;
 }
+
+/** A starred session, without the live title lookup. */
+export interface FavoriteRecord {
+  source: ToolSource;
+  projectId: string;
+  sessionId: string;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Favorite plus the current session row, when the original file is still there. */
+export interface FavoriteItem extends FavoriteRecord {
+  missing: boolean;
+  session?: SessionSummary;
+}

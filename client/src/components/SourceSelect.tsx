@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import type { View } from "../api";
 import { ToolIcon, AllToolsIcon } from "./ToolIcon";
 
+function StarMenuIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width={18} height={18} aria-hidden>
+      <path
+        fill="#c96442"
+        d="M12 2.6 14.7 8.2l6.1.9-4.4 4.3 1 6.1L12 16.6 6.6 19.5l1-6.1L3.2 9.1l6.1-.9L12 2.6z"
+      />
+    </svg>
+  );
+}
+
 type Option = {
   value: View;
   label: string;
@@ -9,6 +20,7 @@ type Option = {
 };
 
 const OPTIONS: Option[] = [
+  { value: "favorites", label: "收藏", icon: <StarMenuIcon /> },
   { value: "all", label: "全部（混合）", icon: <AllToolsIcon /> },
   { value: "grok", label: "Grok", icon: <ToolIcon source="grok" /> },
   { value: "codex", label: "Codex", icon: <ToolIcon source="codex" /> },
@@ -25,7 +37,10 @@ export function SourceSelect({
 }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
-  const current = OPTIONS.find((o) => o.value === value) ?? OPTIONS[2];
+  const current =
+    OPTIONS.find((o) => o.value === value) ??
+    OPTIONS.find((o) => o.value === "claude") ??
+    OPTIONS[0];
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {

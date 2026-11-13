@@ -5,11 +5,13 @@ import type {
   Entry,
   SearchHit,
   PageResult,
+  FavoriteItem,
+  FavoriteRecord,
 } from "./types";
 
 export type Source = "claude" | "cursor" | "codex" | "grok";
-// The top selector also offers the aggregated cross-tool view.
-export type View = Source | "all";
+// The top selector also offers the aggregated cross-tool view and favorites.
+export type View = Source | "all" | "favorites";
 export type ProjectSearchScope = { source: Source; projectId: string };
 export type SearchRole = "all" | "user" | "assistant";
 
@@ -96,6 +98,30 @@ async function del(url: string): Promise<void> {
     try {
       const body = await r.json();
       if (body?.error) msg = body.error;
+    } catch {}
+    throw new Error(msg);
+  }
+}
+
+async function put<T>(url: string, body: unknown): Promise<T> {
+  return j<T>(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function delJson(url: string, body: unknown): Promise<void> {
+  const r = await fetch(url, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let msg = `${r.status} ${r.statusText}`;
+    try {
+      const b = await r.json();
+      if (b?.error) msg = b.error;
     } catch {}
     throw new Error(msg);
   }
@@ -205,6 +231,15 @@ export const api = {
       ),
       { customTitle }
     ),
+  favorites: () => j<FavoriteItem[]>("/api/favorites"),
+  saveFavorite: (body: {
+    source: Source;
+    projectId: string;
+    sessionId: string;
+    note?: string;
+  }) => put<FavoriteRecord>("/api/favorites", body),
+  removeFavorite: (body: { source: Source; projectId: string; sessionId: string }) =>
+    delJson("/api/favorites", body),
   // Opens the local file manager at the folder backing a project (sessionId
   // omitted) or the specific session file (sessionId set).
   reveal: async (projectId: string, sessionId: string | undefined, source: Source = "claude") => {

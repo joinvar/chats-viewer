@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, isNotFoundError, LIST_PAGE_SIZE, type Source, type View } from "./api";
-import type { ProjectSummary, SessionSummary, Transcript, SearchHit } from "./types";
+import type { ProjectSummary, SessionSummary, Transcript, SearchHit, FavoriteItem } from "./types";
 import { ProjectList } from "./components/ProjectList";
 import { SessionList } from "./components/SessionList";
 import { TranscriptView } from "./components/Transcript";
@@ -64,7 +64,8 @@ function saveSelection(view: View, sel: Selection) {
 // The backend source the current selection lives in. For per-tool views that's
 // the view itself; for "all" it follows the row the user picked.
 function sourceForView(view: View, fallback: Source): Source {
-  return view === "all" ? fallback : view;
+  if (view === "all" || view === "favorites") return fallback;
+  return view;
 }
 
 function loadWidths(): { a: number; b: number } {
@@ -100,7 +101,8 @@ function loadView(): View {
       s === "claude" ||
       s === "codex" ||
       s === "grok" ||
-      s === "all"
+      s === "all" ||
+      s === "favorites"
     )
       return s;
   } catch {}
@@ -177,6 +179,10 @@ export default function App() {
   const projectsGen = useRef(0);
   const allSessionsGen = useRef(0);
   const sessionsGen = useRef(0);
+  // Bumped after a local star/note change so a slower list reload can't
+  // overwrite that change with a stale copy.
+  const favGen = useRef(0);
+  const favBusy = useRef(new Set<string>());
 
   const [widths, setWidths] = useState(loadWidths);
   const [vis, setVis] = useState(loadVis);
@@ -184,9 +190,13 @@ export default function App() {
   // refresh so destructive deletes can never be left armed by accident.
   const [dangerMode, setDangerMode] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(loadChromeHidden);
+  const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
 
   // In "all" / by-conversation mode there is no project column and the middle
   // column shows the global, time-sorted conversation stream instead.
+  // Favorites is the same shape: one list, no project column.
+  const favoritesMode = view === "favorites";
   const conversationMode = view === "all" && unifiedMode === "session";
 
   function toggleChrome() {
@@ -253,6 +263,7 @@ export default function App() {
   }
 
   function selectSession(s: SessionSummary) {
+    if (favoriteInfo(s, s.source ?? activeSource)?.missing) return;
     if (s.source) {
       // Row from the aggregated global stream — it carries its own backend and
       // project, so jump straight there.
@@ -261,6 +272,125 @@ export default function App() {
       setSessionId(s.sessionId);
     } else {
       setSessionId(s.sessionId);
+    }
+  }
+
+  function favId(source: string, projectId: string, sessionId: string) {
+    return `${source}\0${projectId}\0${sessionId}`;
+  }
+
+  function favoriteInfo(s: SessionSummary, fallback: Source) {
+    const src = s.source ?? fallback;
+    const hit = favorites.find(
+      (f) => f.source === src && f.projectId === s.projectId && f.sessionId === s.sessionId
+    );
+    if (!hit) return null;
+    return { note: hit.note, missing: hit.missing };
+  }
+
+  function markFavoriteMissing(source: Source, projectId: string, sessionId?: string) {
+    favGen.current++;
+    setFavorites((prev) =>
+      prev.map((f) => {
+        if (f.source !== source || f.projectId !== projectId) return f;
+        if (sessionId && f.sessionId !== sessionId) return f;
+        const { session: _drop, ...rest } = f;
+        return { ...rest, missing: true };
+      })
+    );
+  }
+
+  async function reloadFavorites(): Promise<void> {
+    const gen = ++favGen.current;
+    const items = await api.favorites();
+    if (gen !== favGen.current) return;
+    setFavorites(items);
+    setFavoritesLoaded(true);
+  }
+
+  async function toggleFavorite(s: SessionSummary) {
+    const src = (s.source ?? activeSource) as Source;
+    const pid = s.projectId;
+    if (!pid) return;
+    const key = favId(src, pid, s.sessionId);
+    if (favBusy.current.has(key)) return;
+    if (!favoritesLoaded) {
+      setError("收藏还在读取，请稍等再试");
+      return;
+    }
+    favBusy.current.add(key);
+    const existing = favorites.find(
+      (f) => f.source === src && f.projectId === pid && f.sessionId === s.sessionId
+    );
+    try {
+      if (existing) {
+        await api.removeFavorite({ source: src, projectId: pid, sessionId: s.sessionId });
+        favGen.current++;
+        setFavorites((prev) =>
+          prev.filter(
+            (f) => !(f.source === src && f.projectId === pid && f.sessionId === s.sessionId)
+          )
+        );
+      } else {
+        const rec = await api.saveFavorite({
+          source: src,
+          projectId: pid,
+          sessionId: s.sessionId,
+        });
+        favGen.current++;
+        setFavorites((prev) => {
+          const without = prev.filter(
+            (f) => !(f.source === src && f.projectId === pid && f.sessionId === s.sessionId)
+          );
+          const item: FavoriteItem = {
+            ...rec,
+            missing: false,
+            session: { ...s, source: src, projectId: pid },
+          };
+          return [item, ...without];
+        });
+      }
+    } catch (e) {
+      setError(`收藏失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      favBusy.current.delete(key);
+    }
+  }
+
+  async function saveFavoriteNote(s: SessionSummary, note: string) {
+    const src = (s.source ?? activeSource) as Source;
+    const pid = s.projectId;
+    if (!pid) return;
+    const key = favId(src, pid, s.sessionId);
+    if (favBusy.current.has(key)) return;
+    favBusy.current.add(key);
+    try {
+      const rec = await api.saveFavorite({
+        source: src,
+        projectId: pid,
+        sessionId: s.sessionId,
+        note,
+      });
+      favGen.current++;
+      setFavorites((prev) => {
+        const idx = prev.findIndex(
+          (f) => f.source === src && f.projectId === pid && f.sessionId === s.sessionId
+        );
+        // Star was turned off before this note landed — don't recreate it.
+        if (idx < 0) return prev;
+        const next = prev.slice();
+        next[idx] = {
+          ...prev[idx],
+          note: rec.note,
+          createdAt: rec.createdAt,
+          updatedAt: rec.updatedAt,
+        };
+        return next;
+      });
+    } catch (e) {
+      setError(`备注保存失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      favBusy.current.delete(key);
     }
   }
 
@@ -283,6 +413,7 @@ export default function App() {
     }
     try {
       await api.deleteProject(p.id, src);
+      markFavoriteMissing(src, p.id);
       setProjects((ps) => {
         const next = ps.filter((x) => !(x.id === p.id && (x.source ?? src) === src));
         if (next.length !== ps.length) {
@@ -345,6 +476,13 @@ export default function App() {
         d && d.projectId === pid ? { ...d, items: apply(d.items) } : d
       );
       setAllSessions((items) => apply(items));
+      setFavorites((prev) =>
+        prev.map((f) =>
+          f.source === src && f.projectId === pid && f.sessionId === s.sessionId && f.session
+            ? { ...f, session: { ...f.session, customTitle: next } }
+            : f
+        )
+      );
     } catch (e) {
       setError(`重命名失败: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -368,6 +506,7 @@ export default function App() {
     if (!window.confirm(`再次确认：将永久删除 ${pathHint}，无法恢复！\n\n继续？`)) return;
     try {
       await api.deleteSession(pid, s.sessionId, src);
+      markFavoriteMissing(src, pid, s.sessionId);
       const match = (x: SessionSummary) =>
         x.sessionId === s.sessionId && (x.source ?? src) === src;
       setSessionsData((d) => {
@@ -413,6 +552,7 @@ export default function App() {
       : false;
 
   async function reloadProjectsFirstPage() {
+    if (view === "favorites") return;
     const gen = ++projectsGen.current;
     setLoadingProjects(true);
     try {
@@ -429,13 +569,28 @@ export default function App() {
     }
   }
 
-  // Load the projects column for the current view (skip in by-conversation
-  // mode, where the column is hidden). Progressive: first page only.
   useEffect(() => {
-    if (conversationMode) {
+    let cancelled = false;
+    reloadFavorites().catch((e) => {
+      if (cancelled) return;
+      setFavoritesLoaded(true);
+      setError(`读取收藏失败: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Mount only. Later reloads go through reloadFavorites, guarded by favGen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Load the projects column for the current view (skip in by-conversation
+  // mode and favorites, where the column is hidden). Progressive: first page only.
+  useEffect(() => {
+    if (conversationMode || view === "favorites") {
       setProjects([]);
       setProjectsTotal(0);
       setProjectsHasMore(false);
+      setLoadingProjects(false);
       return;
     }
     let cancelled = false;
@@ -472,14 +627,14 @@ export default function App() {
   }, [view, unifiedMode, conversationMode]);
 
   const loadMoreProjects = useCallback(() => {
-    if (conversationMode || loadingMoreProjects || !projectsHasMore) return;
+    if (conversationMode || view === "favorites" || loadingMoreProjects || !projectsHasMore) return;
     const gen = projectsGen.current;
     const offset = projects.length;
     setLoadingMoreProjects(true);
     const p =
       view === "all"
         ? api.allProjects(offset, LIST_PAGE_SIZE)
-        : api.projects(view as Source, offset, LIST_PAGE_SIZE);
+        : api.projects(view, offset, LIST_PAGE_SIZE);
     p.then((page) => {
       if (gen !== projectsGen.current) return;
       setProjects((prev) => {
@@ -499,10 +654,10 @@ export default function App() {
       });
   }, [
     conversationMode,
+    view,
     loadingMoreProjects,
     projectsHasMore,
     projects.length,
-    view,
   ]);
 
   // Load the global, time-sorted conversation stream for by-conversation mode.
@@ -579,7 +734,7 @@ export default function App() {
   // Load the sessions for the selected project (skip in by-conversation mode).
   // Progressive: first page only.
   useEffect(() => {
-    if (conversationMode) return;
+    if (conversationMode || view === "favorites") return;
     if (!projectId) return;
     let cancelled = false;
     const gen = ++sessionsGen.current;
@@ -618,10 +773,10 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, activeSource, conversationMode]);
+  }, [projectId, activeSource, conversationMode, view]);
 
   const loadMoreSessions = useCallback(() => {
-    if (conversationMode || !projectId) return;
+    if (conversationMode || view === "favorites" || !projectId) return;
     if (loadingMoreSessions || !sessionsHasMore) return;
     if (!sessionsData || sessionsData.projectId !== projectId) return;
     if (sessionsData.source !== activeSource) return;
@@ -658,6 +813,7 @@ export default function App() {
       });
   }, [
     conversationMode,
+    view,
     projectId,
     activeSource,
     loadingMoreSessions,
@@ -669,10 +825,23 @@ export default function App() {
   // (even if only page 1). Used as a stable gate so load-more does not
   // re-trigger transcript reloads.
   const sessionsReady =
+    favoritesMode ||
     conversationMode ||
     (!!sessionsData &&
       sessionsData.projectId === projectId &&
       sessionsData.source === activeSource);
+
+  const selectedFavoriteMissing =
+    favoritesMode &&
+    !!projectId &&
+    !!sessionId &&
+    favorites.some(
+      (f) =>
+        f.missing &&
+        f.source === activeSource &&
+        f.projectId === projectId &&
+        f.sessionId === sessionId
+    );
 
   // Drop a selection that no longer exists on disk (common after cleaning empty
   // sessions, or when localStorage still points at a deleted id). Clear quietly
@@ -680,15 +849,15 @@ export default function App() {
   function clearStaleSelection() {
     setSessionId(null);
     setTranscript(null);
-    if (conversationMode) {
-      // In by-conversation mode the projectId is only meaningful with a session.
+    if (conversationMode || favoritesMode) {
+      // In a flat list the projectId is only meaningful with a session.
       setProjectId(null);
     }
     // Persist the cleared selection immediately so the next reload doesn't
     // re-fetch the same missing file.
     saveSelection(view, {
       source: activeSource,
-      projectId: conversationMode ? null : projectId,
+      projectId: conversationMode || favoritesMode ? null : projectId,
       sessionId: null,
     });
   }
@@ -698,6 +867,14 @@ export default function App() {
   useEffect(() => {
     if (!projectId || !sessionId) return;
     if (!sessionsReady) return;
+    // Wait until we know whether this favorite's file is still there.
+    // Fetching a missing one would clear the selection and drop the note row.
+    if (favoritesMode && !favoritesLoaded) return;
+    if (selectedFavoriteMissing) {
+      setLoadingTranscript(false);
+      setTranscript(null);
+      return;
+    }
 
     let cancelled = false;
     setLoadingTranscript(true);
@@ -720,7 +897,7 @@ export default function App() {
     // clearStaleSelection closes over latest view/projectId; effect deps already
     // cover the values that gate the fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, sessionId, activeSource, sessionsReady, conversationMode]);
+  }, [projectId, sessionId, activeSource, sessionsReady, conversationMode, favoritesMode, favoritesLoaded, selectedFavoriteMissing]);
 
   // Re-scan local session files and refresh the project / conversation lists.
   // Does NOT reload the currently open transcript — that's what the transcript
@@ -738,6 +915,13 @@ export default function App() {
       conversationMode,
     };
     try {
+      const favPromise = reloadFavorites().catch((e) => {
+        setError(`读取收藏失败: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      if (snapshot.view === "favorites") {
+        await favPromise;
+        return;
+      }
       if (snapshot.conversationMode) {
         const gen = ++allSessionsGen.current;
         const limit = Math.min(
@@ -809,6 +993,7 @@ export default function App() {
           setLoadingMoreSessions(false);
         }
       }
+      await favPromise;
     } catch (e) {
       setError(`刷新列表失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -880,7 +1065,24 @@ export default function App() {
     } catch {}
   }
 
-  const showProjectsCol = vis.projects && !conversationMode;
+  const favoriteSessions: SessionSummary[] = favorites.map((f) => {
+    if (f.session) {
+      return {
+        ...f.session,
+        source: f.source,
+        projectId: f.projectId,
+        sessionId: f.sessionId,
+      };
+    }
+    return {
+      sessionId: f.sessionId,
+      projectId: f.projectId,
+      source: f.source,
+      messageCount: 0,
+    };
+  });
+
+  const showProjectsCol = vis.projects && !conversationMode && !favoritesMode;
   // Conversation list is also toggleable in by-conversation mode (it is the
   // only side column there; Projects is already hidden).
   const showSessionsCol = vis.sessions;
@@ -910,7 +1112,7 @@ export default function App() {
             </div>
           )}
           <div className="panel-toggles">
-            {!conversationMode && (
+            {!conversationMode && !favoritesMode && (
               <button
                 className={"toggle" + (vis.projects ? " on" : "")}
                 onClick={() => toggleVis("projects")}
@@ -931,9 +1133,15 @@ export default function App() {
             <button
               className={"toggle" + (vis.sessions ? " on" : "")}
               onClick={() => toggleVis("sessions")}
-              title={conversationMode ? "显示/隐藏对话列表" : "Toggle sessions panel"}
+              title={
+                favoritesMode
+                  ? "显示/隐藏收藏"
+                  : conversationMode
+                  ? "显示/隐藏对话列表"
+                  : "Toggle sessions panel"
+              }
             >
-              ▤ Sessions
+              {favoritesMode ? "▤ 收藏" : "▤ Sessions"}
             </button>
             <button
               className={"toggle danger" + (dangerMode ? " on" : "")}
@@ -944,7 +1152,7 @@ export default function App() {
             </button>
           </div>
           <SearchBar
-            source={view}
+            source={view === "favorites" ? "all" : view}
             onOpenHit={openSearchHit}
             projects={projects}
             onQueryChange={setSearchQuery}
@@ -991,7 +1199,28 @@ export default function App() {
         {showSessionsCol && (
           <>
             <aside className="col col-sessions" style={{ width: widths.b }}>
-              {conversationMode ? (
+              {favoritesMode ? (
+                <SessionList
+                  sessions={favoriteSessions}
+                  loading={!favoritesLoaded}
+                  selectedId={sessionId}
+                  selectedSource={activeSource}
+                  onSelect={selectSession}
+                  dangerMode={dangerMode}
+                  onDelete={handleDeleteSession}
+                  onRename={handleRenameSession}
+                  onReveal={handleRevealSession}
+                  headerLabel="收藏"
+                  showTool
+                  emptyLabel="还没有收藏"
+                  totalCount={favorites.length}
+                  onRefresh={refreshLists}
+                  refreshing={refreshingLists}
+                  favoriteOf={(s) => favoriteInfo(s, activeSource)}
+                  onToggleFavorite={toggleFavorite}
+                  onSaveNote={saveFavoriteNote}
+                />
+              ) : conversationMode ? (
                 <SessionList
                   sessions={allSessions}
                   loading={loadingAllSessions}
@@ -1010,6 +1239,9 @@ export default function App() {
                   onLoadMore={loadMoreAllSessions}
                   onRefresh={refreshLists}
                   refreshing={refreshingLists}
+                  favoriteOf={(s) => favoriteInfo(s, activeSource)}
+                  onToggleFavorite={toggleFavorite}
+                  onSaveNote={saveFavoriteNote}
                 />
               ) : (
                 <SessionList
@@ -1029,6 +1261,9 @@ export default function App() {
                   onLoadMore={loadMoreSessions}
                   onRefresh={refreshLists}
                   refreshing={refreshingLists}
+                  favoriteOf={(s) => favoriteInfo(s, activeSource)}
+                  onToggleFavorite={toggleFavorite}
+                  onSaveNote={saveFavoriteNote}
                 />
               )}
             </aside>
@@ -1038,7 +1273,9 @@ export default function App() {
         <main className="col col-transcript">
           {loadingTranscript && <div className="hint">Loading…</div>}
           {!loadingTranscript && !transcript && (
-            <div className="hint">Select a session</div>
+            <div className="hint">
+              {selectedFavoriteMissing ? "原对话找不到了，备注还在" : "Select a session"}
+            </div>
           )}
           {transcript && (
             <TranscriptView
@@ -1051,6 +1288,26 @@ export default function App() {
               searchQuery={searchQuery}
               chromeHidden={chromeHidden}
               onToggleChrome={toggleChrome}
+              favorited={favorites.some(
+                (f) =>
+                  f.source === activeSource &&
+                  f.projectId === transcript.meta.projectId &&
+                  f.sessionId === transcript.meta.sessionId
+              )}
+              favoriteNote={
+                favorites.find(
+                  (f) =>
+                    f.source === activeSource &&
+                    f.projectId === transcript.meta.projectId &&
+                    f.sessionId === transcript.meta.sessionId
+                )?.note ?? ""
+              }
+              onToggleFavorite={() =>
+                toggleFavorite({ ...transcript.meta, source: activeSource })
+              }
+              onSaveFavoriteNote={(note) =>
+                saveFavoriteNote({ ...transcript.meta, source: activeSource }, note)
+              }
             />
           )}
         </main>

@@ -9,6 +9,7 @@ import type {
 import { EntryView, isPureToolEntry } from "./Entry";
 import { TreeView } from "./TreeView";
 import { CopyResume } from "./CopyResume";
+import { FavoriteNote, FavoriteStar } from "./FavoriteNote";
 import { Splitter } from "./Splitter";
 import {
   cleanSessionTitle,
@@ -105,6 +106,10 @@ export function TranscriptView(props: {
   searchQuery?: string;
   chromeHidden?: boolean;
   onToggleChrome?: () => void;
+  favorited?: boolean;
+  favoriteNote?: string;
+  onToggleFavorite?: () => void;
+  onSaveFavoriteNote?: (note: string) => void;
 }) {
   const {
     transcript,
@@ -116,6 +121,10 @@ export function TranscriptView(props: {
     searchQuery,
     chromeHidden,
     onToggleChrome,
+    favorited,
+    favoriteNote,
+    onToggleFavorite,
+    onSaveFavoriteNote,
   } = props;
   const { entries, byUuid, childrenOf, roots } = transcript;
 
@@ -513,12 +522,26 @@ export function TranscriptView(props: {
       {!chromeHidden && (
         <div className="transcript-head">
           <div className="transcript-title">
-            {transcript.meta.customTitle ||
-              cleanSessionTitle(firstRealUserText(entries)) ||
-              cleanSessionTitle(transcript.meta.agentName) ||
-              cleanSessionTitle(transcript.meta.lastPrompt) ||
-              transcript.meta.sessionId.slice(0, 8)}
+            {onToggleFavorite && (
+              <FavoriteStar on={!!favorited} onToggle={onToggleFavorite} />
+            )}
+            <span className="transcript-title-text">
+              {transcript.meta.customTitle ||
+                cleanSessionTitle(firstRealUserText(entries)) ||
+                cleanSessionTitle(transcript.meta.agentName) ||
+                cleanSessionTitle(transcript.meta.lastPrompt) ||
+                transcript.meta.sessionId.slice(0, 8)}
+            </span>
           </div>
+          {favorited && onSaveFavoriteNote && (
+            <div className="transcript-fav-note">
+              <FavoriteNote
+                note={favoriteNote ?? ""}
+                onSave={onSaveFavoriteNote}
+                clamp={false}
+              />
+            </div>
+          )}
           <div className="transcript-sub">
             {transcript.meta.cwd && <span>{transcript.meta.cwd}</span>}
             {transcript.meta.gitBranch && (

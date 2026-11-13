@@ -55,6 +55,11 @@ import {
   GROK_SESSIONS_ROOT,
 } from "./grok.js";
 import { revealInFileManager } from "./reveal.js";
+import {
+  listFavoritesResolved,
+  upsertFavorite,
+  deleteFavorite,
+} from "./favorites.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -344,6 +349,32 @@ app.post("/api/reveal", async (req, res) => {
 
     if (!fs.existsSync(target)) return res.status(404).json({ error: "路径不存在" });
     await revealInFileManager(target, isFile);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message ?? "error" });
+  }
+});
+
+app.get("/api/favorites", async (_req, res) => {
+  try {
+    noStore(res);
+    res.json(await listFavoritesResolved());
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? "error" });
+  }
+});
+
+app.put("/api/favorites", async (req, res) => {
+  try {
+    res.json(await upsertFavorite(req.body));
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message ?? "error" });
+  }
+});
+
+app.delete("/api/favorites", async (req, res) => {
+  try {
+    await deleteFavorite(req.body);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ error: e?.message ?? "error" });

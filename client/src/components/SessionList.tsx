@@ -4,7 +4,10 @@ import type { Source } from "../api";
 import { cleanSessionTitle, formatRelative } from "../util";
 import { CopyIconButton } from "./CopyIconButton";
 import { CopyResume } from "./CopyResume";
+import { FavoriteNote, FavoriteStar } from "./FavoriteNote";
 import { ToolIcon } from "./ToolIcon";
+
+export type FavoriteRowInfo = { note: string; missing: boolean } | null;
 
 export function SessionList(props: {
   sessions: SessionSummary[];
@@ -28,6 +31,10 @@ export function SessionList(props: {
   onLoadMore?: () => void;
   onRefresh?: () => void;
   refreshing?: boolean;
+  emptyLabel?: string;
+  favoriteOf?: (s: SessionSummary) => FavoriteRowInfo;
+  onToggleFavorite?: (s: SessionSummary) => void;
+  onSaveNote?: (s: SessionSummary, note: string) => void;
 }) {
   const {
     sessions,
@@ -48,6 +55,10 @@ export function SessionList(props: {
     onLoadMore,
     onRefresh,
     refreshing,
+    emptyLabel = "No sessions",
+    favoriteOf,
+    onToggleFavorite,
+    onSaveNote,
   } = props;
 
   const listRef = useRef<HTMLDivElement>(null);
@@ -115,9 +126,7 @@ export function SessionList(props: {
         )}
       </div>
       {loading && sessions.length === 0 && <div className="hint">Loading…</div>}
-      {!loading && sessions.length === 0 && (
-        <div className="hint">No sessions</div>
-      )}
+      {!loading && sessions.length === 0 && <div className="hint">{emptyLabel}</div>}
       {sessions.map((s) => {
         // firstUserText is the stable opening of the conversation;
         // agentName is Claude Code's auto-generated topic label that gets
@@ -131,19 +140,25 @@ export function SessionList(props: {
           cleanSessionTitle(s.lastPrompt) ||
           s.sessionId.slice(0, 8);
         const rowSource = s.source ?? source;
+        const fav = favoriteOf?.(s) ?? null;
+        const missing = !!fav?.missing;
         const selected =
           s.sessionId === selectedId &&
           (selectedSource == null || s.source === selectedSource);
         return (
           <div
-            key={(s.source ?? "") + ":" + s.sessionId}
+            key={(s.source ?? "") + ":" + s.projectId + ":" + s.sessionId}
             className={
               "list-item list-item-session" +
               (selected ? " selected" : "") +
-              (dangerMode ? " danger-on" : "")
+              (dangerMode ? " danger-on" : "") +
+              (missing ? " missing" : "")
             }
-            onClick={() => onSelect(s)}
-            title={`${title}\n${s.sessionId}`}
+            onClick={() => {
+              if (missing) return;
+              onSelect(s);
+            }}
+            title={missing ? "原对话找不到了" : `${title}\n${s.sessionId}`}
           >
             <div className="session-row-main">
               {showTool && s.source && (
@@ -153,22 +168,37 @@ export function SessionList(props: {
               )}
               <div className="session-row-body">
                 <div className="item-title-row">
+                  {onToggleFavorite && (
+                    <FavoriteStar on={!!fav} onToggle={() => onToggleFavorite(s)} />
+                  )}
                   {s.promptOnly && (
                     <span className="badge badge-prompt-only" title="全文已删除，只剩你当时输入的内容">
                       只有输入
                     </span>
                   )}
+                  {missing && (
+                    <span className="badge badge-missing" title="原文件已经不在，备注还留着">
+                      原对话找不到了
+                    </span>
+                  )}
                   <div className="item-title">{title}</div>
                 </div>
+                {fav && onSaveNote && (
+                  <FavoriteNote note={fav.note} onSave={(note) => onSaveNote(s, note)} />
+                )}
                 <div className="item-footer">
+                  {missing ? (
+                    <div className="item-sub">备注还留着，点不开正文</div>
+                  ) : (
                   <div className="item-sub">
                     {showTool && s.cwd && shortCwd(s.cwd) + " · "}
                     {s.promptOnly ? `${s.messageCount} 条输入` : `${s.messageCount} msg`}
                     {s.endedAt && " · " + formatRelative(s.endedAt)}
                     {s.gitBranch && " · " + s.gitBranch}
                   </div>
+                  )}
                   <div className="item-actions">
-                    {onRename && rowSource !== "cursor" && !s.promptOnly && (
+                    {onRename && !missing && rowSource !== "cursor" && !s.promptOnly && (
                       <button
                         className="rename-btn"
                         onClick={(e) => {
@@ -180,17 +210,17 @@ export function SessionList(props: {
                         ✎
                       </button>
                     )}
-                    {!s.promptOnly && (
+                    {!missing && !s.promptOnly && (
                       <CopyResume sessionId={s.sessionId} variant="icon" source={rowSource} />
                     )}
-                    {s.revealPath && (
+                    {!missing && s.revealPath && (
                       <CopyIconButton
                         text={s.revealPath}
                         title={`复制会话文件路径\n${s.revealPath}`}
                         icon="📄"
                       />
                     )}
-                    {onReveal && (
+                    {!missing && onReveal && (
                       <button
                         className="reveal-btn"
                         onClick={(e) => {
@@ -202,7 +232,7 @@ export function SessionList(props: {
                         📂
                       </button>
                     )}
-                    {dangerMode && onDelete && !s.promptOnly && (
+                    {dangerMode && !missing && onDelete && !s.promptOnly && (
                       <button
                         className="delete-btn"
                         onClick={(e) => {
