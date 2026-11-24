@@ -19,7 +19,7 @@ export function CopyResume(props: {
       : source === "grok"
       ? `grok --resume=${sessionId} --permission-mode bypassPermissions`
       : source === "antigravity"
-      ? `agy --conversation=${sessionId}`
+      ? `agy --conversation=${sessionId} --dangerously-skip-permissions`
       : null;
 
   if (!command) return null;
