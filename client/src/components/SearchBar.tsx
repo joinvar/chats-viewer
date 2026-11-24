@@ -595,6 +595,8 @@ export function SearchBar({
               ? "搜索 Codex 对话…"
               : source === "grok"
               ? "搜索 Grok 对话…"
+              : source === "antigravity"
+              ? "搜索 Antigravity 对话…"
               : "搜索 Claude Code 对话…"
           }
         />
@@ -1155,7 +1157,8 @@ function isToolSource(value: string): value is ToolSource {
     value === "claude" ||
     value === "cursor" ||
     value === "codex" ||
-    value === "grok"
+    value === "grok" ||
+    value === "antigravity"
   );
 }
 

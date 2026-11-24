@@ -54,6 +54,16 @@ import {
   renameGrokSession,
   GROK_SESSIONS_ROOT,
 } from "./grok.js";
+import {
+  listAntigravityProjects,
+  listAntigravitySessions,
+  antigravitySessionFilePath,
+  parseAntigravitySession,
+  deleteAntigravityProject,
+  deleteAntigravitySession,
+  renameAntigravitySession,
+  antigravityProjectRevealPath,
+} from "./antigravity.js";
 import { revealInFileManager } from "./reveal.js";
 import {
   listFavoritesResolved,
@@ -79,12 +89,13 @@ app.use((req, res, next) => {
   next();
 });
 
-type Source = "claude" | "cursor" | "codex" | "grok";
+type Source = "claude" | "cursor" | "codex" | "grok" | "antigravity";
 function pickSource(req: express.Request): Source {
   const s = req.query.source;
   if (s === "codex") return "codex";
   if (s === "cursor") return "cursor";
   if (s === "grok") return "grok";
+  if (s === "antigravity") return "antigravity";
   return "claude";
 }
 
@@ -106,7 +117,8 @@ function parseProjectScopes(value: unknown): ProjectSearchScope[] | undefined {
       (source === "claude" ||
         source === "cursor" ||
         source === "codex" ||
-        source === "grok") &&
+        source === "grok" ||
+        source === "antigravity") &&
       typeof projectId === "string" &&
       projectId
     ) {
@@ -197,6 +209,8 @@ app.get("/api/projects", async (req, res) => {
         ? await listCodexProjects()
         : src === "grok"
         ? await listGrokProjects()
+        : src === "antigravity"
+        ? await listAntigravityProjects()
         : await listProjects();
     res.json(pageSlice(all, offset, limit));
   } catch (e: any) {
@@ -217,6 +231,8 @@ app.get("/api/projects/:id/sessions", async (req, res) => {
         ? await listCodexSessions(req.params.id)
         : src === "grok"
         ? await listGrokSessions(req.params.id)
+        : src === "antigravity"
+        ? await listAntigravitySessions(req.params.id)
         : await listSessions(req.params.id);
     res.json(pageSlice(all, offset, limit));
   } catch (e: any) {
@@ -234,6 +250,8 @@ app.get("/api/sessions/:projectId/:sessionId", async (req, res) => {
         ? await codexSessionFilePath(req.params.projectId, req.params.sessionId)
         : src === "grok"
         ? grokSessionFilePath(req.params.projectId, req.params.sessionId)
+        : src === "antigravity"
+        ? antigravitySessionFilePath(req.params.projectId, req.params.sessionId)
         : sessionFilePath(req.params.projectId, req.params.sessionId);
     if (src === "claude" && !fs.existsSync(file)) {
       const promptOnly = await getPromptOnlyTranscript(
@@ -252,6 +270,8 @@ app.get("/api/sessions/:projectId/:sessionId", async (req, res) => {
         ? await parseCodexSession(req.params.projectId, req.params.sessionId, file)
         : src === "grok"
         ? await parseGrokSession(req.params.projectId, req.params.sessionId, file)
+        : src === "antigravity"
+        ? await parseAntigravitySession(req.params.projectId, req.params.sessionId, file)
         : await parseSession(req.params.projectId, req.params.sessionId, file);
     const { byUuid: _drop, ...wire } = t;
     res.json(wire);
@@ -266,6 +286,7 @@ app.delete("/api/projects/:id", async (req, res) => {
     if (src === "cursor") await deleteCursorProject(req.params.id);
     else if (src === "codex") await deleteCodexProject(req.params.id);
     else if (src === "grok") await deleteGrokProject(req.params.id);
+    else if (src === "antigravity") await deleteAntigravityProject(req.params.id);
     else await deleteProject(req.params.id);
     invalidateAllCaches();
     res.json({ ok: true });
@@ -280,6 +301,8 @@ app.delete("/api/sessions/:projectId/:sessionId", async (req, res) => {
     if (src === "cursor") await deleteCursorSession(req.params.projectId, req.params.sessionId);
     else if (src === "codex") await deleteCodexSession(req.params.projectId, req.params.sessionId);
     else if (src === "grok") await deleteGrokSession(req.params.projectId, req.params.sessionId);
+    else if (src === "antigravity")
+      await deleteAntigravitySession(req.params.projectId, req.params.sessionId);
     else await deleteSession(req.params.projectId, req.params.sessionId);
     invalidateAllCaches();
     res.json({ ok: true });
@@ -301,6 +324,9 @@ app.patch("/api/sessions/:projectId/:sessionId", async (req, res) => {
     } else if (src === "grok") {
       // Grok keeps title in summary.json (same fields /rename writes).
       await renameGrokSession(req.params.projectId, req.params.sessionId, title);
+    } else if (src === "antigravity") {
+      // Title lives in conversation_summaries plus annotations/<id>.pbtxt.
+      await renameAntigravitySession(req.params.projectId, req.params.sessionId, title);
     } else {
       // Cursor's transcript is a pure event log written by Cursor itself, with
       // no separate title index to update.
@@ -332,6 +358,8 @@ app.post("/api/reveal", async (req, res) => {
           ? await codexSessionFilePath(projectId, sessionId)
           : src === "grok"
           ? grokSessionFilePath(projectId, sessionId)
+          : src === "antigravity"
+          ? antigravitySessionFilePath(projectId, sessionId)
           : sessionFilePath(projectId, sessionId);
       isFile = true;
     } else if (src === "cursor") {
@@ -342,6 +370,9 @@ app.post("/api/reveal", async (req, res) => {
       isFile = false;
     } else if (src === "grok") {
       target = resolveWithinRoot(GROK_SESSIONS_ROOT, projectId);
+      isFile = false;
+    } else if (src === "antigravity") {
+      target = await antigravityProjectRevealPath(projectId);
       isFile = false;
     } else {
       throw new Error("Codex 项目没有单一目录，请在具体会话上打开");

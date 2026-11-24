@@ -13,10 +13,11 @@ import {
   parseCodexSession,
 } from "./codex.js";
 import { listGrokFiles, parseGrokSession } from "./grok.js";
+import { listAntigravityFiles, parseAntigravitySession } from "./antigravity.js";
 import { getPromptOnlyTranscript, promptOnlySnapshot } from "./claudeHistory.js";
 import type { SearchHit, Entry, ContentBlock } from "./types.js";
 
-export type SearchSource = "claude" | "cursor" | "codex" | "grok";
+export type SearchSource = "claude" | "cursor" | "codex" | "grok" | "antigravity";
 export type SearchRole = "user" | "assistant";
 export interface ProjectSearchScope {
   source: SearchSource;
@@ -55,6 +56,7 @@ const indexes: Record<SearchSource, SourceIndex> = {
   cursor: { rows: [], metas: {}, mtimes: {}, lastBuild: 0 },
   codex: { rows: [], metas: {}, mtimes: {}, lastBuild: 0 },
   grok: { rows: [], metas: {}, mtimes: {}, lastBuild: 0 },
+  antigravity: { rows: [], metas: {}, mtimes: {}, lastBuild: 0 },
 };
 
 async function claudeEnumerate(): Promise<
@@ -140,6 +142,12 @@ async function grokEnumerate(): Promise<
   return listGrokFiles();
 }
 
+async function antigravityEnumerate(): Promise<
+  Array<{ projectId: string; sessionId: string; file: string; mtime: number }>
+> {
+  return listAntigravityFiles();
+}
+
 async function ensureIndex(source: SearchSource): Promise<void> {
   const idx = indexes[source];
   const now = Date.now();
@@ -154,6 +162,8 @@ async function ensureIndex(source: SearchSource): Promise<void> {
       ? await codexEnumerate()
       : source === "grok"
       ? await grokEnumerate()
+      : source === "antigravity"
+      ? await antigravityEnumerate()
       : await claudeEnumerate();
   const seen: Record<string, number> = {};
   const toRefresh: Array<{ projectId: string; sessionId: string; file: string }> = [];
@@ -197,6 +207,8 @@ async function ensureIndex(source: SearchSource): Promise<void> {
         ? await parseCodexSession(projectId, sessionId, file)
         : source === "grok"
         ? await parseGrokSession(projectId, sessionId, file)
+        : source === "antigravity"
+        ? await parseAntigravitySession(projectId, sessionId, file)
         : await parseSession(projectId, sessionId, file);
       if (!t) continue;
       idx.metas[`${projectId}::${sessionId}`] = {
@@ -318,11 +330,12 @@ export async function searchAll(
     if (!projectScopes) return projectId;
     return projectScopes.filter((s) => s.source === source).map((s) => s.projectId);
   };
-  const [claude, cursor, codex, grok] = await Promise.all([
+  const [claude, cursor, codex, grok, antigravity] = await Promise.all([
     search(q, limit, "claude", scopedIds("claude"), since, until, role),
     search(q, limit, "cursor", scopedIds("cursor"), since, until, role),
     search(q, limit, "codex", scopedIds("codex"), since, until, role),
     search(q, limit, "grok", scopedIds("grok"), since, until, role),
+    search(q, limit, "antigravity", scopedIds("antigravity"), since, until, role),
   ]);
   const tag = (arr: SearchHit[], source: SearchSource): SearchHit[] =>
     arr.map((h) => ({ ...h, source }));
@@ -331,6 +344,7 @@ export async function searchAll(
     ...tag(cursor, "cursor"),
     ...tag(codex, "codex"),
     ...tag(grok, "grok"),
+    ...tag(antigravity, "antigravity"),
   ];
   hits.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
   return hits.slice(0, limit);

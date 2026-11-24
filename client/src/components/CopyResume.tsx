@@ -18,6 +18,8 @@ export function CopyResume(props: {
       ? `cursor-agent --resume=${sessionId} --yolo`
       : source === "grok"
       ? `grok --resume=${sessionId} --permission-mode bypassPermissions`
+      : source === "antigravity"
+      ? `agy --conversation=${sessionId}`
       : null;
 
   if (!command) return null;

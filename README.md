@@ -1,6 +1,6 @@
 # Chats Viewer
 
-本地查看 `Claude Code`、`Cursor`、`Codex`、`Grok` 历史对话的网页应用。直接只读扫描本地会话文件，不修改原始记录。
+本地查看 `Claude Code`、`Cursor`、`Codex`、`Grok`、`反重力`（Antigravity CLI）历史对话的网页应用。直接只读扫描本地会话文件，不修改原始记录。
 
 ## 启动
 
@@ -68,7 +68,7 @@ npm run install:all
 界面三列，列之间的灰条可以左右拖拽调节宽度，宽度会记住。
 
 - **顶部来源切换**  
-  `Claude Code`、`Cursor`、`Codex`、`Grok` 四种来源可随时切换。另外有 **`全部（混合）`** 一项，把各工具汇到一起：
+  `Claude Code`、`Cursor`、`Codex`、`Grok`、`反重力` 五种来源可随时切换。另外有 **`全部（混合）`** 一项，把各工具汇到一起：
   - 选「全部」后顶栏出现 **按对话 / 按项目** 切换。
   - **按对话**：所有工具的会话拉平成一条按时间倒序的总流，每条左侧带工具图标，点开直接看 transcript。
   - **按项目**：所有工具的项目合并按最近修改排序，项目和会话行都带工具图标。
@@ -87,7 +87,7 @@ npm run install:all
   - 消息里的 `<system-reminder>` 会被折叠成小 chip，避免遮挡正文。
   - 右上角 **⎇ Tree** 按钮打开分支树视图：看到完整的父子链和所有 rewind 产生的分支点；点任意节点，把 transcript 切换到从根到该节点的路径；非当前路径上的节点会变暗。
   - 如果某条 assistant 的 `tool_use` 启动过 Agent（sidechain），sub-conversation 会折叠在那条 tool_use 下面。
-  - `Codex` / `Grok` / `Cursor` 会显示 `tool_use` / `tool_result` / `thinking`，并支持复制 resume 命令（`codex resume …` / `grok --resume=…` / `cursor-agent --resume=…`）。
+  - `Codex` / `Grok` / `Cursor` / `反重力` 会显示 `tool_use` / `tool_result`，并支持复制 resume 命令（`codex resume …` / `grok --resume=…` / `cursor-agent --resume=…` / `agy --conversation=…`）。
 
 - **顶部搜索框**  
   跨所有项目的所有 session 做子串匹配（大小写无关）。匹配 user/assistant 正文和 thinking，不匹配 metadata。点搜索结果会跳到对应 session 并滚动到命中位置（高亮一下）。首次搜索会走全量索引，稍慢；之后按文件 mtime 增量更新。
@@ -115,6 +115,7 @@ npm run install:all
   - `Cursor` → `~/.cursor/projects/<项目>/agent-transcripts/<chatId>/<chatId>.jsonl`
   - `Codex` → `~/.codex/sessions/YYYY/MM/DD/*.jsonl`
   - `Grok` → `~/.grok/sessions/<encoded-cwd>/<sessionId>/`（读 `updates.jsonl` + `summary.json`）
+  - `反重力` → `~/.gemini/antigravity-cli/conversations/<id>.db`（按工作区分组；标题在 `conversation_summaries.db`）
 - `client/` · React + Vite + TypeScript，端口 5173。dev 模式下 `/api` 代理到 4000。
 - 生产模式下 server 进程同时托管 `client/dist`，一个端口搞定。
 
@@ -152,6 +153,7 @@ chats-viewer/
 │       ├── cursor.ts     # Cursor 适配
 │       ├── codex.ts      # Codex 适配
 │       ├── grok.ts       # Grok 适配（~/.grok/sessions）
+│       ├── antigravity.ts # 反重力适配（~/.gemini/antigravity-cli）
 │       └── search.ts     # 全量索引 + mtime 增量（含跨工具聚合搜索）
 └── client/
     ├── package.json
@@ -187,5 +189,6 @@ chats-viewer/
 - Claude Code 项目目录名是 Claude 自己编码的（Windows 的 `D:\code\chats-viewer` → `D--code-chats-viewer`），反解回路径是 best-effort——如果原始路径里就有 `-`，显示的 cwd 可能不准确，但 session 里记录了真实 `cwd`，进入 session 后可以看到。
 - Codex session 按日期存放，不按项目分目录；这里会按 session 里的 `cwd` 重新聚合成项目视图。
 - Grok 按工作区 URL 编码分目录（如 `D%3A%5Ccode%5Cchats-viewer`）；对话以 `updates.jsonl` 为准，标题与模型信息读 `summary.json`。删除只动 `~/.grok/sessions/...`，不会碰 skills/config。
+- 反重力读的是 CLI 目录 `~/.gemini/antigravity-cli`（可用环境变量 `ANTIGRAVITY_HOME` 改）。对话正文在 sqlite 里，按步骤抽出用户消息、助手回复、工具调用和接口报错。内部提醒（比如“干得快一点”）不展示。删除只动该对话的 `.db`、备注和 brain 目录，不会删工作区代码。
 - 搜索是纯子串匹配，不做分词、不做模糊匹配，中英文都按字面匹配。
 - 目前没有虚拟滚动，单 session 消息数量特别大（几千条）时渲染会慢。

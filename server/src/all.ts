@@ -5,6 +5,7 @@ import { promptOnlyProjectIds } from "./claudeHistory.js";
 import { listCursorProjects, listCursorSessions, CURSOR_PROJECTS_ROOT } from "./cursor.js";
 import { listCodexProjects, listCodexSessions, listCodexFiles } from "./codex.js";
 import { listGrokProjects, listGrokSessions, GROK_SESSIONS_ROOT } from "./grok.js";
+import { listAntigravityProjects, listAntigravitySessions } from "./antigravity.js";
 
 // The aggregated ("all") view merges the per-tool listings into one
 // time-sorted stream. Every row is tagged with its `source` so the client can
@@ -43,17 +44,19 @@ let allProjectsCache: { at: number; projects: ProjectSummary[] } | null = null;
 let allProjectsInflight: Promise<ProjectSummary[]> | null = null;
 
 async function computeAllProjects(): Promise<ProjectSummary[]> {
-  const [claude, cursor, codex, grok] = await Promise.all([
+  const [claude, cursor, codex, grok, antigravity] = await Promise.all([
     listProjects().catch(() => [] as ProjectSummary[]),
     listCursorProjects().catch(() => [] as ProjectSummary[]),
     listCodexProjects().catch(() => [] as ProjectSummary[]),
     listGrokProjects().catch(() => [] as ProjectSummary[]),
+    listAntigravityProjects().catch(() => [] as ProjectSummary[]),
   ]);
   const all = [
     ...tagProjects(claude, "claude"),
     ...tagProjects(cursor, "cursor"),
     ...tagProjects(codex, "codex"),
     ...tagProjects(grok, "grok"),
+    ...tagProjects(antigravity, "antigravity"),
   ];
   all.sort((a, b) => (b.lastModified || "").localeCompare(a.lastModified || ""));
   return all;
@@ -88,6 +91,10 @@ async function listProjectIds(source: ToolSource): Promise<string[]> {
     const files = await listCodexFiles().catch(() => []);
     return [...new Set(files.map((f) => f.projectId))];
   }
+  if (source === "antigravity") {
+    const projects = await listAntigravityProjects().catch(() => [] as ProjectSummary[]);
+    return projects.map((p) => p.id);
+  }
   const root =
     source === "cursor"
       ? CURSOR_PROJECTS_ROOT
@@ -115,6 +122,8 @@ async function sessionsForSource(source: ToolSource): Promise<SessionSummary[]> 
       ? listCodexSessions
       : source === "grok"
       ? listGrokSessions
+      : source === "antigravity"
+      ? listAntigravitySessions
       : listSessions;
 
   const ids = await listProjectIds(source).catch(() => [] as string[]);
@@ -146,6 +155,7 @@ async function computeAllSessions(): Promise<SessionSummary[]> {
     timedSource("cursor"),
     timedSource("codex"),
     timedSource("grok"),
+    timedSource("antigravity"),
   ]);
   const all = parts.flatMap((p) => p.sessions);
   all.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));

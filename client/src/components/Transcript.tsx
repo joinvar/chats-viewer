@@ -227,12 +227,13 @@ export function TranscriptView(props: {
     saveSessionEntry<string>(BRANCH_KEY, transcript.meta.sessionId, selectedLeaf);
   }, [selectedLeaf, transcript]);
 
-  // cursor/codex sessions are inherently linear (no branching), so "All"
+  // cursor/codex/antigravity sessions are inherently linear (no branching), so "All"
   // toggles compact vs full instead of branch-path vs all-branches:
   //   compact = hide entries whose only content is tool_use / tool_result /
   //             thinking (keep the conversational flow).
   //   full    = show every entry.
-  const isLinearSource = source === "cursor" || source === "codex";
+  const isLinearSource =
+    source === "cursor" || source === "codex" || source === "antigravity";
 
   const pathEntries = useMemo<Entry[]>(() => {
     const nonSide = entries.filter((e) => !e.isSidechain);
@@ -879,7 +880,7 @@ function findLeaves(
 
 // True when the entry carries no conversational text — only tool calls,
 // tool results, thinking, or attachments. These are hidden in compact mode
-// for linear sources (cursor / codex) so the "All" toggle has visible effect.
+// for linear sources (cursor / codex / 反重力) so the "All" toggle has visible effect.
 function isAuxiliaryEntry(e: Entry): boolean {
   if (e.kind === "user") {
     if (typeof e.content === "string") return e.content.trim().length === 0;

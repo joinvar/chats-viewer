@@ -6,6 +6,7 @@ import { listSessions } from "./projects.js";
 import { listCursorSessions } from "./cursor.js";
 import { listCodexSessions } from "./codex.js";
 import { listGrokSessions } from "./grok.js";
+import { listAntigravitySessions } from "./antigravity.js";
 
 /** Personal data, outside the repo so it is not committed and survives rebuilds. */
 const DIR = path.join(os.homedir(), ".chats-viewer");
@@ -51,7 +52,13 @@ function assertSafeId(id: unknown, label: string): string {
 function parseKey(body: unknown): { source: ToolSource; projectId: string; sessionId: string } {
   if (!body || typeof body !== "object") throw new Error("收藏参数不对");
   const source = (body as { source?: unknown }).source;
-  if (source !== "claude" && source !== "cursor" && source !== "codex" && source !== "grok") {
+  if (
+    source !== "claude" &&
+    source !== "cursor" &&
+    source !== "codex" &&
+    source !== "grok" &&
+    source !== "antigravity"
+  ) {
     throw new Error("收藏来源不对");
   }
   return {
@@ -75,7 +82,8 @@ function isRecord(x: unknown): x is FavoriteRecord {
     (o.source === "claude" ||
       o.source === "cursor" ||
       o.source === "codex" ||
-      o.source === "grok") &&
+      o.source === "grok" ||
+      o.source === "antigravity") &&
     typeof o.projectId === "string" &&
     typeof o.sessionId === "string" &&
     typeof o.note === "string" &&
@@ -144,6 +152,7 @@ async function sessionsFor(source: ToolSource, projectId: string): Promise<Sessi
   if (source === "cursor") return listCursorSessions(projectId);
   if (source === "codex") return listCodexSessions(projectId);
   if (source === "grok") return listGrokSessions(projectId);
+  if (source === "antigravity") return listAntigravitySessions(projectId);
   return listSessions(projectId);
 }
 

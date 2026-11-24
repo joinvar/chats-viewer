@@ -43,7 +43,8 @@ function loadSelection(view: View): Selection {
     e?.source === "claude" ||
     e?.source === "cursor" ||
     e?.source === "codex" ||
-    e?.source === "grok"
+    e?.source === "grok" ||
+    e?.source === "antigravity"
       ? e.source
       : undefined;
   return {
@@ -101,6 +102,7 @@ function loadView(): View {
       s === "claude" ||
       s === "codex" ||
       s === "grok" ||
+      s === "antigravity" ||
       s === "all" ||
       s === "favorites"
     )
@@ -129,6 +131,7 @@ function sourceTitle(source: Source): string {
   if (source === "cursor") return "Cursor";
   if (source === "codex") return "Codex";
   if (source === "grok") return "Grok";
+  if (source === "antigravity") return "Antigravity";
   return "Claude Code";
 }
 
@@ -404,6 +407,8 @@ export default function App() {
         ? `~/.codex/sessions（当前项目匹配的所有 session 文件）`
         : src === "grok"
         ? `~/.grok/sessions/${p.id}`
+        : src === "antigravity"
+        ? `~/.gemini/antigravity-cli 里这个工作区的对话（不会删工作区里的代码）`
         : `~/.claude/projects/${p.id}`;
     if (!window.confirm(`确认删除项目「${label}」？\n\n该项目下所有 session 都会被删除。`)) {
       return;
@@ -502,6 +507,8 @@ export default function App() {
         ? `~/.codex/sessions 中的 Codex session ${s.sessionId}`
         : src === "grok"
         ? `~/.grok/sessions/${pid}/${s.sessionId}/`
+        : src === "antigravity"
+        ? `~/.gemini/antigravity-cli/conversations/${s.sessionId}.db`
         : `${s.sessionId}.jsonl`;
     if (!window.confirm(`再次确认：将永久删除 ${pathHint}，无法恢复！\n\n继续？`)) return;
     try {
