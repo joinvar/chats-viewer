@@ -7,6 +7,7 @@ import { listCursorSessions } from "./cursor.js";
 import { listCodexSessions } from "./codex.js";
 import { listGrokSessions } from "./grok.js";
 import { listAntigravitySessions } from "./antigravity.js";
+import { listOrcaSessions } from "./orca.js";
 
 /** Personal data, outside the repo so it is not committed and survives rebuilds. */
 const DIR = path.join(os.homedir(), ".chats-viewer");
@@ -57,7 +58,8 @@ function parseKey(body: unknown): { source: ToolSource; projectId: string; sessi
     source !== "cursor" &&
     source !== "codex" &&
     source !== "grok" &&
-    source !== "antigravity"
+    source !== "antigravity" &&
+    source !== "orca"
   ) {
     throw new Error("收藏来源不对");
   }
@@ -83,7 +85,8 @@ function isRecord(x: unknown): x is FavoriteRecord {
       o.source === "cursor" ||
       o.source === "codex" ||
       o.source === "grok" ||
-      o.source === "antigravity") &&
+      o.source === "antigravity" ||
+      o.source === "orca") &&
     typeof o.projectId === "string" &&
     typeof o.sessionId === "string" &&
     typeof o.note === "string" &&
@@ -153,6 +156,7 @@ async function sessionsFor(source: ToolSource, projectId: string): Promise<Sessi
   if (source === "codex") return listCodexSessions(projectId);
   if (source === "grok") return listGrokSessions(projectId);
   if (source === "antigravity") return listAntigravitySessions(projectId);
+  if (source === "orca") return listOrcaSessions(projectId);
   return listSessions(projectId);
 }
 

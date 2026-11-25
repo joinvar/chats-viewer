@@ -597,6 +597,8 @@ export function SearchBar({
               ? "搜索 Grok 对话…"
               : source === "antigravity"
               ? "搜索 Antigravity 对话…"
+              : source === "orca"
+              ? "搜索 Orca 对话…"
               : "搜索 Claude Code 对话…"
           }
         />
@@ -1158,7 +1160,8 @@ function isToolSource(value: string): value is ToolSource {
     value === "cursor" ||
     value === "codex" ||
     value === "grok" ||
-    value === "antigravity"
+    value === "antigravity" ||
+    value === "orca"
   );
 }
 

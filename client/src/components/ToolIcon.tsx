@@ -9,6 +9,7 @@ export function ToolIcon({ source, size = 18 }: { source: Source; size?: number 
   if (source === "cursor") return <CursorIcon size={size} />;
   if (source === "grok") return <GrokIcon size={size} />;
   if (source === "antigravity") return <AntigravityIcon size={size} />;
+  if (source === "orca") return <OrcaIcon size={size} />;
   return <ClaudeIcon size={size} />;
 }
 
@@ -27,6 +28,22 @@ export function AllToolsIcon({ size = 18 }: { size?: number }) {
         <CodexIcon size={Math.round(size * 0.72)} />
       </span>
     </span>
+  );
+}
+
+export function OrcaIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden>
+      <path
+        fill="#163A4A"
+        d="M2.8 13.2c1.6-5.4 7.2-8 12.6-6.2 2.2.7 3.8 2.2 4.8 3.6-1.3.2-2.4 1.1-2.8 2.3.9.2 1.7.8 2.2 1.6-1.6 1.5-3.8 2.1-5.8 1.6-1.1 2.2-3.3 3.5-5.9 3.3-3.3-.3-5.7-2.7-6.3-5.4-.3-.8 0-1.4 1.2-.8z"
+      />
+      <path
+        fill="#F7F4EF"
+        d="M8.4 14.6c1.7 1.6 4.3 1.8 6.3.7-1.6 1.1-3.8.8-5.2-.5-1-.9-1.5-1.4-1.1-.2z"
+      />
+      <circle cx="15.4" cy="10.1" r=".85" fill="#F7F4EF" />
+    </svg>
   );
 }
 

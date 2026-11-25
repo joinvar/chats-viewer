@@ -116,7 +116,7 @@ export function ProjectList(props: {
                 📂
               </button>
             )}
-            {dangerMode && onDelete && (
+            {dangerMode && onDelete && rowSource !== "orca" && (
               <button
                 className="delete-btn"
                 onClick={(e) => {

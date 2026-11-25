@@ -20,10 +20,14 @@ export function CopyResume(props: {
       ? `grok --resume=${sessionId} --permission-mode bypassPermissions`
       : source === "antigravity"
       ? `agy --conversation=${sessionId} --dangerously-skip-permissions`
+      : source === "orca"
+      ? sessionId
       : null;
 
   if (!command) return null;
   const cmd: string = command;
+  const idleTitle = source === "orca" ? `复制对话 ID\n${sessionId}` : cmd;
+  const pillTitle = source === "orca" ? "点击复制对话 ID" : "Click to copy";
 
   async function copy(e: React.MouseEvent) {
     e.stopPropagation();
@@ -49,7 +53,7 @@ export function CopyResume(props: {
     return (
       <button
         className={"copy-icon" + (copied ? " copied" : "")}
-        title={copied ? "Copied!" : cmd}
+        title={copied ? "Copied!" : idleTitle}
         onClick={copy}
       >
         {copied ? "✓" : "⧉"}
@@ -60,7 +64,7 @@ export function CopyResume(props: {
   return (
     <button
       className={"copy-pill" + (copied ? " copied" : "")}
-      title="Click to copy"
+      title={pillTitle}
       onClick={copy}
     >
       <code>{cmd}</code>

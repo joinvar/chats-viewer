@@ -233,7 +233,7 @@ export function TranscriptView(props: {
   //             thinking (keep the conversational flow).
   //   full    = show every entry.
   const isLinearSource =
-    source === "cursor" || source === "codex" || source === "antigravity";
+    source === "cursor" || source === "codex" || source === "antigravity" || source === "orca";
 
   const pathEntries = useMemo<Entry[]>(() => {
     const nonSide = entries.filter((e) => !e.isSidechain);

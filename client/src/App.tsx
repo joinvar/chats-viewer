@@ -44,7 +44,8 @@ function loadSelection(view: View): Selection {
     e?.source === "cursor" ||
     e?.source === "codex" ||
     e?.source === "grok" ||
-    e?.source === "antigravity"
+    e?.source === "antigravity" ||
+    e?.source === "orca"
       ? e.source
       : undefined;
   return {
@@ -103,6 +104,7 @@ function loadView(): View {
       s === "codex" ||
       s === "grok" ||
       s === "antigravity" ||
+      s === "orca" ||
       s === "all" ||
       s === "favorites"
     )
@@ -132,6 +134,7 @@ function sourceTitle(source: Source): string {
   if (source === "codex") return "Codex";
   if (source === "grok") return "Grok";
   if (source === "antigravity") return "Antigravity";
+  if (source === "orca") return "Orca 对话";
   return "Claude Code";
 }
 
@@ -399,6 +402,10 @@ export default function App() {
 
   async function handleDeleteProject(p: ProjectSummary) {
     const src = p.source ?? sourceForView(view, activeSource);
+    if (src === "orca") {
+      setError("Orca 对话存在它自己的数据库里，这里只查看，不删除。");
+      return;
+    }
     const label = p.cwd || p.id;
     const rootLabel =
       src === "cursor"
@@ -461,8 +468,12 @@ export default function App() {
     const src = s.source ?? activeSource;
     const pid = s.projectId ?? projectId;
     if (!pid) return;
-    if (src === "cursor") {
-      setError(`${sourceTitle(src)} 对话不支持重命名`);
+    if (src === "cursor" || src === "orca") {
+      setError(
+        src === "orca"
+          ? "Orca 对话存在它自己的数据库里，这里只查看，不改名。"
+          : `${sourceTitle(src)} 对话不支持重命名`
+      );
       return;
     }
     const input = window.prompt("重命名 session", currentTitle);
@@ -497,6 +508,10 @@ export default function App() {
     const src = s.source ?? activeSource;
     const pid = s.projectId ?? projectId;
     if (!pid) return;
+    if (src === "orca") {
+      setError("Orca 对话存在它自己的数据库里，这里只查看，不删除。");
+      return;
+    }
     const label =
       s.customTitle || s.agentName || s.firstUserText?.slice(0, 60) || s.sessionId.slice(0, 8);
     if (!window.confirm(`确认删除 session「${label}」？`)) return;

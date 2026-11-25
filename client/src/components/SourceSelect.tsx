@@ -22,6 +22,7 @@ type Option = {
 const OPTIONS: Option[] = [
   { value: "favorites", label: "收藏", icon: <StarMenuIcon /> },
   { value: "all", label: "全部（混合）", icon: <AllToolsIcon /> },
+  { value: "orca", label: "Orca 对话", icon: <ToolIcon source="orca" /> },
   { value: "antigravity", label: "Antigravity", icon: <ToolIcon source="antigravity" /> },
   { value: "grok", label: "Grok", icon: <ToolIcon source="grok" /> },
   { value: "codex", label: "Codex", icon: <ToolIcon source="codex" /> },

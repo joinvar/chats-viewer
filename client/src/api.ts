@@ -9,7 +9,7 @@ import type {
   FavoriteRecord,
 } from "./types";
 
-export type Source = "claude" | "cursor" | "codex" | "grok" | "antigravity";
+export type Source = "claude" | "cursor" | "codex" | "grok" | "antigravity" | "orca";
 // The top selector also offers the aggregated cross-tool view and favorites.
 export type View = Source | "all" | "favorites";
 export type ProjectSearchScope = { source: Source; projectId: string };

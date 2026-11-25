@@ -78,7 +78,7 @@ export interface SystemEntry extends BaseEntry {
 
 export type Entry = UserEntry | AssistantEntry | AttachmentEntry | SystemEntry;
 
-export type ToolSource = "claude" | "cursor" | "codex" | "grok" | "antigravity";
+export type ToolSource = "claude" | "cursor" | "codex" | "grok" | "antigravity" | "orca";
 
 export interface SessionMeta {
   sessionId: string;

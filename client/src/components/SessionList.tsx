@@ -198,7 +198,11 @@ export function SessionList(props: {
                   </div>
                   )}
                   <div className="item-actions">
-                    {onRename && !missing && rowSource !== "cursor" && !s.promptOnly && (
+                    {onRename &&
+                      !missing &&
+                      rowSource !== "cursor" &&
+                      rowSource !== "orca" &&
+                      !s.promptOnly && (
                       <button
                         className="rename-btn"
                         onClick={(e) => {
@@ -232,7 +236,7 @@ export function SessionList(props: {
                         📂
                       </button>
                     )}
-                    {dangerMode && !missing && onDelete && !s.promptOnly && (
+                    {dangerMode && !missing && onDelete && !s.promptOnly && rowSource !== "orca" && (
                       <button
                         className="delete-btn"
                         onClick={(e) => {
