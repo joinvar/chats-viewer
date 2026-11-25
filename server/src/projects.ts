@@ -5,6 +5,8 @@ import readline from "node:readline";
 import type { ProjectSummary, SessionSummary } from "./types.js";
 import { evictCachedProject, evictCachedSession, summarizeCached } from "./summaryCache.js";
 import { promptOnlySnapshot, summarizePromptOnly } from "./claudeHistory.js";
+import { openingSnippet } from "./util.js";
+export { stripSystemReminders } from "./util.js";
 
 export const PROJECTS_ROOT = path.join(os.homedir(), ".claude", "projects");
 
@@ -168,17 +170,11 @@ export async function summarizeSession(
       }
       if (o.type === "user" && !summary.firstUserText && !o.isMeta) {
         const text = extractUserText(o.message?.content);
-        if (text && hasMeaningfulOpening(text)) {
-          summary.firstUserText = stripSystemReminders(text).slice(0, 300);
-        }
+        summary.firstUserText = openingSnippet(text);
       }
     }
   }
   return summary;
-}
-
-export function stripSystemReminders(s: string): string {
-  return s.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
 }
 
 // Pull a usable text snippet out of a user-message content field. The
@@ -195,36 +191,6 @@ function extractUserText(content: unknown): string {
     }
   }
   return "";
-}
-
-// True when a candidate user opening has substantive content — i.e. not
-// just a /clear / /compact slash command or a bare "[Image #1]" placeholder.
-// Used to skip past noise openings when picking firstUserText so titles
-// reflect the user's first real prompt. Mirrors the client-side
-// hasMeaningfulTitle / cleanSessionTitle logic.
-function hasMeaningfulOpening(text: string): boolean {
-  let s = text;
-  s = s.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "");
-  s = s.replace(/<command-message>[\s\S]*?<\/command-message>/g, "");
-  s = s.replace(
-    /<local-command-(?:stdout|stderr)>[\s\S]*?<\/local-command-(?:stdout|stderr)>/g,
-    ""
-  );
-  s = s.replace(
-    /<command-name>([\s\S]*?)<\/command-name>\s*(?:<command-args>([\s\S]*?)<\/command-args>)?/g,
-    (_m, name, args) => {
-      const n = (name ?? "").trim();
-      const a = (args ?? "").trim();
-      return a ? `${n} ${a} ` : `${n} `;
-    }
-  );
-  s = s.replace(/<\/?[a-zA-Z][\w-]*(?:\s[^>]*)?>/g, "");
-  s = s.replace(/^(?:\s*\[Image[^\]]*\])+/g, "");
-  s = s.replace(/\s+/g, " ").trim();
-  if (!s) return false;
-  // A bare slash command, optionally with a few args, is not meaningful.
-  if (/^\/[a-zA-Z][\w-]*(?:\s+\S+){0,2}$/.test(s)) return false;
-  return true;
 }
 
 export async function listSessions(projectId: string): Promise<SessionSummary[]> {

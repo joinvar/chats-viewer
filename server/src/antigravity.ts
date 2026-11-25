@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { DatabaseSync } from "node:sqlite";
+import { openingSnippet } from "./util.js";
 
 type SqlValue = null | number | bigint | string | Uint8Array;
 import type {
@@ -104,7 +105,12 @@ export async function listAntigravitySessions(projectId: string): Promise<Sessio
   const loaded = await loadSessions();
   const rows = loaded
     .filter((s) => s.summary.projectId === projectId)
-    .map((s) => s.summary);
+    .map(({ summary, file }) => {
+      if (!summary.customTitle) {
+        summary.firstUserText = readFirstUserText(file) ?? summary.firstUserText;
+      }
+      return summary;
+    });
   rows.sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || ""));
   return rows;
 }
@@ -396,6 +402,27 @@ function cleanText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function readFirstUserText(file: string): string | undefined {
+  try {
+    const db = openRead(file);
+    try {
+      const query = db.prepare("SELECT step_payload FROM steps WHERE step_type = ? ORDER BY idx");
+      for (const row of query.iterate(STEP_USER)) {
+        const payload = asBuf(row.step_payload);
+        if (!payload) continue;
+        const text = userStepText(payload);
+        const snippet = text && openingSnippet(text);
+        if (snippet) return snippet;
+      }
+    } finally {
+      db.close();
+    }
+  } catch {
+    // The CLI may still be initializing this database. Keep the summary preview.
+  }
+  return undefined;
+}
+
 function countChatSteps(file: string): number {
   try {
     const db = openRead(file);
@@ -666,6 +693,10 @@ function cleanThought(raw: string | undefined): string | undefined {
   return t || undefined;
 }
 
+function userStepText(payload: Buffer): string | undefined {
+  return textAt(payload, [19, 2]) || textAt(payload, [19, 3, 1]);
+}
+
 function entriesFromStep(
   sessionId: string,
   idx: number,
@@ -675,7 +706,7 @@ function entriesFromStep(
   prev: string | null
 ): Entry[] {
   if (stepType === STEP_USER) {
-    const text = textAt(payload, [19, 2]) || textAt(payload, [19, 3, 1]);
+    const text = userStepText(payload);
     if (!text) return [];
     const entry: UserEntry = {
       uuid: `${sessionId}:${idx}`,
